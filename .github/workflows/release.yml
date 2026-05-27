@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,17 +16,26 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build executable
-        shell: pwsh
-        run: ./scripts/build-limpeza.ps1
+        shell: powershell
+        run: .\scripts\build-limpeza.ps1
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = $tag.TrimStart('v')
-          $notes = @"
+          $ErrorActionPreference = 'Stop'
+          $tag = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { '${{ github.ref_name }}' }
+          if ($tag -like 'refs/tags/*') {
+            $tag = $tag.Substring('refs/tags/'.Length)
+          }
+
+          if (-not (Test-Path 'dist/LimpezaWindows.exe')) {
+            throw 'dist/LimpezaWindows.exe nao foi gerado pelo build.'
+          }
+
+          if (-not (Test-Path 'RELEASE_NOTES.md')) {
+            @"
           ## Limpeza Avancada do Windows $tag
 
           - Executavel com icone personalizado e elevacao automatica (UAC)
@@ -37,8 +47,15 @@ jobs:
           2. Execute como Administrador
 
           Repositorio: https://github.com/${{ github.repository }}
-          "@
-          $notes | Out-File -FilePath RELEASE_NOTES.md -Encoding utf8
-          gh release create $tag dist/LimpezaWindows.exe `
-            --title "Limpeza Avancada do Windows $tag" `
-            --notes-file RELEASE_NOTES.md
+          "@ | Out-File -FilePath RELEASE_NOTES.md -Encoding utf8
+          }
+
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag ja existe. Atualizando asset..."
+            gh release upload $tag dist/LimpezaWindows.exe --clobber
+          } else {
+            gh release create $tag dist/LimpezaWindows.exe `
+              --title "Limpeza Avancada do Windows $tag" `
+              --notes-file RELEASE_NOTES.md
+          }
