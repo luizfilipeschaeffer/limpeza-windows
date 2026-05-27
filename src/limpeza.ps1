@@ -1,8 +1,8 @@
 #Requires -RunAsAdministrator
-# Limpeza Avancada do Windows v2.0.1
+# Limpeza Avancada do Windows v2.0.2
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.1'
+$AppVersion = '2.0.2'
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -27,38 +27,168 @@ $script:GitHubApiHeaders = @{
     'Accept'     = 'application/vnd.github+json'
 }
 $script:UpdateAssetName = 'LimpezaWindows.exe'
+$script:ShortcutFileName = 'Limpeza Avancada do Windows.lnk'
 
-function Get-AppInstallInfo {
-    $runningExe = $PSCommandPath -match '\.exe$'
-    if ($runningExe) {
-        $exePath = $PSCommandPath
-        $version = $AppVersion
-        if (Test-Path $exePath) {
-            $fileVersion = (Get-Item -LiteralPath $exePath).VersionInfo.ProductVersion
-            if ($fileVersion) {
-                $parts = $fileVersion.Split('.')
-                $version = if ($parts.Count -ge 3) {
-                    "$($parts[0]).$($parts[1]).$($parts[2])"
-                } else {
-                    $fileVersion
-                }
-            }
-        }
-        return [PSCustomObject]@{
-            Mode             = 'exe'
-            ExecutablePath   = $exePath
-            InstallDirectory = Split-Path $exePath -Parent
-            CurrentVersion   = $version
-        }
+function Get-SystemInstallPath {
+    Join-Path $env:SystemRoot $script:UpdateAssetName
+}
+
+function Test-SameFilePath {
+    param(
+        [string]$PathA,
+        [string]$PathB
+    )
+
+    if (-not $PathA -or -not $PathB) { return $false }
+    try {
+        return [System.IO.Path]::GetFullPath($PathA).Equals(
+            [System.IO.Path]::GetFullPath($PathB),
+            [StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-ExecutableSourcePath {
+    if ($PSCommandPath -match '\.exe$' -and (Test-Path -LiteralPath $PSCommandPath)) {
+        return $PSCommandPath
     }
 
-    $projectRoot = Split-Path $PSScriptRoot -Parent
-    $exePath = Join-Path $projectRoot "dist\$script:UpdateAssetName"
+    $distExe = Join-Path (Split-Path $PSScriptRoot -Parent) "dist\$script:UpdateAssetName"
+    if (Test-Path -LiteralPath $distExe) {
+        return $distExe
+    }
+
+    $systemExe = Get-SystemInstallPath
+    if (Test-Path -LiteralPath $systemExe) {
+        return $systemExe
+    }
+
+    return $null
+}
+
+function Get-FileVersionLabel {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $AppVersion }
+    $fileVersion = (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion
+    if (-not $fileVersion) { return $AppVersion }
+
+    $parts = $fileVersion.Split('.')
+    if ($parts.Count -ge 3) {
+        return "$($parts[0]).$($parts[1]).$($parts[2])"
+    }
+    return $fileVersion
+}
+
+function Set-DesktopShortcut {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TargetPath
+    )
+
+    $desktop = [Environment]::GetFolderPath('Desktop')
+    if (-not $desktop) { return }
+
+    $shortcutPath = Join-Path $desktop $script:ShortcutFileName
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $TargetPath
+    $shortcut.WorkingDirectory = $env:SystemRoot
+    $shortcut.Description = 'Limpeza Avancada do Windows'
+    $shortcut.IconLocation = "$TargetPath,0"
+    $shortcut.Save()
+}
+
+function Test-ShouldCopyExecutable {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath
+    )
+
+    if (-not (Test-Path -LiteralPath $DestinationPath)) { return $true }
+
+    $sourceItem = Get-Item -LiteralPath $SourcePath
+    $destItem = Get-Item -LiteralPath $DestinationPath
+    if ($sourceItem.LastWriteTimeUtc -gt $destItem.LastWriteTimeUtc) { return $true }
+    if ($sourceItem.Length -ne $destItem.Length) { return $true }
+
+    $sourceVersion = $sourceItem.VersionInfo.ProductVersion
+    $destVersion = $destItem.VersionInfo.ProductVersion
+    return $sourceVersion -ne $destVersion
+}
+
+function Invoke-SystemInstallAndShortcut {
+    $sourcePath = Get-ExecutableSourcePath
+    if (-not $sourcePath) { return }
+
+    $systemPath = Get-SystemInstallPath
+    $runningFromSystem = ($PSCommandPath -match '\.exe$') -and (Test-SameFilePath $PSCommandPath $systemPath)
+    $needsCopy = Test-ShouldCopyExecutable -SourcePath $sourcePath -DestinationPath $systemPath
+
+    if ($needsCopy -and -not (Test-SameFilePath $sourcePath $systemPath)) {
+        $prevError = $ErrorActionPreference
+        $ErrorActionPreference = 'Stop'
+        try {
+            Copy-Item -LiteralPath $sourcePath -Destination $systemPath -Force
+        }
+        catch {
+            Write-Host ''
+            Write-Host "   $(E 0x26A0) Nao foi possivel copiar para $systemPath : $($_.Exception.Message)" -ForegroundColor DarkYellow
+            Write-Host ''
+            $ErrorActionPreference = $prevError
+            return
+        }
+        $ErrorActionPreference = $prevError
+    }
+
+    try {
+        Set-DesktopShortcut -TargetPath $systemPath
+    }
+    catch {
+        Write-Host "   $(E 0x26A0) Atalho na Area de Trabalho nao foi criado: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+
+    if ($needsCopy -and -not $runningFromSystem -and ($PSCommandPath -match '\.exe$')) {
+        Write-Host ''
+        Write-Host "   $(E 0x1F4E6) Instalado em $systemPath" -ForegroundColor DarkCyan
+        Write-Host "   $(E 0x1F517) Atalho criado na Area de Trabalho." -ForegroundColor DarkCyan
+        Write-Host '   Reiniciando a partir da instalacao do sistema...' -ForegroundColor DarkGray
+        Write-Host ''
+        Start-Process -FilePath $systemPath -WorkingDirectory $env:SystemRoot
+        exit 0
+    }
+
+    if ($PSCommandPath -match '\.ps1$' -and (Test-Path -LiteralPath $systemPath) -and -not $runningFromSystem) {
+        Write-Host ''
+        Write-Host "   $(E 0x1F4E6) Executavel disponivel em $systemPath" -ForegroundColor DarkCyan
+        Write-Host "   $(E 0x1F517) Atalho criado na Area de Trabalho." -ForegroundColor DarkCyan
+        Write-Host '   Iniciando versao instalada...' -ForegroundColor DarkGray
+        Write-Host ''
+        Start-Process -FilePath $systemPath -WorkingDirectory $env:SystemRoot
+        exit 0
+    }
+}
+
+function Get-AppInstallInfo {
+    $systemPath = Get-SystemInstallPath
+    $runningExe = $PSCommandPath -match '\.exe$'
+    $executablePath = if (Test-Path -LiteralPath $systemPath) {
+        $systemPath
+    }
+    elseif ($runningExe) {
+        $PSCommandPath
+    }
+    else {
+        Join-Path (Split-Path $PSScriptRoot -Parent) "dist\$script:UpdateAssetName"
+    }
+
     return [PSCustomObject]@{
-        Mode             = 'script'
-        ExecutablePath   = $exePath
-        InstallDirectory = $projectRoot
-        CurrentVersion   = $AppVersion
+        Mode             = if ($runningExe) { 'exe' } else { 'script' }
+        ExecutablePath   = $executablePath
+        InstallDirectory = $env:SystemRoot
+        CurrentVersion   = Get-FileVersionLabel -Path $executablePath
     }
 }
 
@@ -103,9 +233,9 @@ function Start-AppUpdateAndRestart {
         [object]$Install
     )
 
-    $targetExe = $Install.ExecutablePath
-    $targetDir = $Install.InstallDirectory
-    New-Item -ItemType Directory -Path (Split-Path $targetExe -Parent) -Force | Out-Null
+    $targetExe = Get-SystemInstallPath
+    $targetDir = $env:SystemRoot
+    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 
     $stagingExe = Join-Path $env:TEMP "LimpezaWindows-$([guid]::NewGuid().ToString('N')).exe"
     Write-Host ''
@@ -125,11 +255,12 @@ function Start-AppUpdateAndRestart {
 
     $pidAtStart = $PID
     $helperPs1 = Join-Path $env:TEMP "limpeza-updater-$([guid]::NewGuid().ToString('N')).ps1"
+    $shortcutName = $script:ShortcutFileName.Replace("'", "''")
+    $systemRoot = $env:SystemRoot.Replace("'", "''")
     $helperContent = @"
 `$ErrorActionPreference = 'Stop'
 `$staging = '$($stagingExe.Replace("'", "''"))'
 `$target = '$($targetExe.Replace("'", "''"))'
-`$workDir = '$($targetDir.Replace("'", "''"))'
 `$parentPid = $pidAtStart
 
 try {
@@ -146,7 +277,20 @@ if (Test-Path `$target) {
     }
 }
 Move-Item -LiteralPath `$staging -Destination `$target -Force
-Start-Process -FilePath `$target -WorkingDirectory `$workDir
+
+`$desktop = [Environment]::GetFolderPath('Desktop')
+if (`$desktop) {
+    `$shortcutPath = Join-Path `$desktop '$shortcutName'
+    `$shell = New-Object -ComObject WScript.Shell
+    `$shortcut = `$shell.CreateShortcut(`$shortcutPath)
+    `$shortcut.TargetPath = `$target
+    `$shortcut.WorkingDirectory = '$systemRoot'
+    `$shortcut.Description = 'Limpeza Avancada do Windows'
+    `$shortcut.IconLocation = "`$target,0"
+    `$shortcut.Save()
+}
+
+Start-Process -FilePath `$target -WorkingDirectory '$systemRoot'
 "@
     Set-Content -Path $helperPs1 -Value $helperContent -Encoding UTF8
 
@@ -338,6 +482,7 @@ function Show-FinalResult {
 
 Initialize-Console
 Show-IntroAnimation
+Invoke-SystemInstallAndShortcut
 Invoke-AppUpdateCheck
 
 $startTime  = Get-Date

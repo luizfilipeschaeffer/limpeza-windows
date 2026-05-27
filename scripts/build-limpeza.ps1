@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $projectDir = Split-Path $PSScriptRoot -Parent
-$versionFile = Join-Path $projectDir 'VERSION'
+$versionFile = Join-Path $projectDir 'config\VERSION'
 $appVersion = if (Test-Path $versionFile) {
     (Get-Content $versionFile -Raw).Trim()
 } else {
@@ -65,4 +65,4 @@ Write-Host 'Executavel criado com sucesso:' -ForegroundColor Green
 Write-Host "  $outputExe"
 Write-Host "  Icone: $iconFile"
 Write-Host ''
-Write-Host 'Execute dist\LimpezaWindows.exe ou limpeza.bat na raiz (UAC sera solicitado).' -ForegroundColor Yellow
+Write-Host 'Execute dist\LimpezaWindows.exe ou bin\limpeza.bat (UAC sera solicitado).' -ForegroundColor Yellow

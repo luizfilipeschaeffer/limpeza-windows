@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $projectDir  = Split-Path $PSScriptRoot -Parent
-$versionFile = Join-Path $projectDir 'VERSION'
+$versionFile = Join-Path $projectDir 'config\VERSION'
 $exePath     = Join-Path $projectDir "dist\$AssetName"
 $buildScript = Join-Path $PSScriptRoot 'build-limpeza.ps1'
 
@@ -41,7 +41,7 @@ if (-not (Test-Path $notesPath)) {
 ### Como usar
 
 1. Baixe ``$AssetName`` desta release
-2. Execute ``limpeza.bat`` ou o executavel como Administrador
+2. Execute ``bin\limpeza.bat`` ou o executavel como Administrador
 
 Repositorio: https://github.com/$Repo
 "@ | Set-Content -Path $notesPath -Encoding UTF8
