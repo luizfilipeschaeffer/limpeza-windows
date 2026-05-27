@@ -1,13 +1,13 @@
-## Limpeza Avancada do Windows v2.0.6
+## Limpeza Avancada do Windows v2.0.7
 
-### Correcao
+### Novidades
 
-- **Fix:** executavel fechava imediatamente ao abrir quando ja existia copia em `C:\Windows\LimpezaWindows.exe`
-- Causa: trecho de codigo solto executava `return` no inicio do script e encerrava o app
+- Menu de agendamento existente aceita apenas **Espaco**, **1** ou **2** (tecla unica, sem Enter)
+- Demais teclas sao ignoradas silenciosamente
 
-### Recomendado
+### Correcoes recentes (v2.0.6)
 
-Usuarios da v2.0.5 devem atualizar para esta versao.
+- Executavel nao fecha mais ao iniciar quando ja existe instalacao em `C:\Windows`
 
 ### Atualizacoes
 

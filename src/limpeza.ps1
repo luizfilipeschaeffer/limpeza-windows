@@ -4,10 +4,10 @@ param(
     [switch]$ScheduledRun
 )
 
-# Limpeza Avancada do Windows v2.0.6
+# Limpeza Avancada do Windows v2.0.7
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.6'
+$AppVersion = '2.0.7'
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -683,24 +683,34 @@ function Get-ExistingScheduledTask {
     }
 }
 
-function Read-ExistingScheduleAction {
+function Read-ExistingScheduleActionKey {
+    Write-Host ''
+    Write-Host -NoNewline '   Pressione Espaco, 1 ou 2: ' -ForegroundColor Yellow
+
     while ($true) {
-        Write-Host '   Ja existe um agendamento para a limpeza automatica.' -ForegroundColor White
-        Write-Host ''
-        Write-Host "         [space] Nao alterar" -ForegroundColor White
-        Write-Host "   $(E 0x270E)  [1] Editar agendamento" -ForegroundColor White
-        Write-Host "   $(E 0x1F5D1)  [2] Remover agendamento" -ForegroundColor White
-        Write-Host ''
-        Write-Host -NoNewline '   Pressione Espaco, 1 ou 2: ' -ForegroundColor Yellow
+        $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
 
-        $answer = Read-Host
-        if ($answer -eq '1') { return 'Edit' }
-        if ($answer -eq '2') { return 'Remove' }
-        if ([string]::IsNullOrWhiteSpace($answer)) { return 'Skip' }
+        switch ($key.Key) {
+            'Spacebar' { return 'Skip' }
+            'D1'       { return 'Edit' }
+            'NumPad1'  { return 'Edit' }
+            'D2'       { return 'Remove' }
+            'NumPad2'  { return 'Remove' }
+        }
 
-        Write-Host '   Opcao invalida. Pressione Espaco, 1 ou 2.' -ForegroundColor Red
-        Write-Host ''
+        if ($key.Character -eq '1') { return 'Edit' }
+        if ($key.Character -eq '2') { return 'Remove' }
     }
+}
+
+function Read-ExistingScheduleAction {
+    Write-Host '   Ja existe um agendamento para a limpeza automatica.' -ForegroundColor White
+    Write-Host ''
+    Write-Host "         [space] Nao alterar" -ForegroundColor White
+    Write-Host "   $(E 0x270E)  [1] Editar agendamento" -ForegroundColor White
+    Write-Host "   $(E 0x1F5D1)  [2] Remover agendamento" -ForegroundColor White
+
+    return Read-ExistingScheduleActionKey
 }
 
 function Remove-LimpezaScheduledTask {
