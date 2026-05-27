@@ -1,21 +1,20 @@
-## Limpeza Avancada do Windows v2.2.0
+## Limpeza Avancada do Windows v2.2.1
 
-### Novidades
+### Correcoes
 
-- **11 etapas de limpeza** (antes eram 7), incluindo:
-  - Cache do **Windows Update** (`SoftwareDistribution\Download`)
-  - **Miniaturas**, logs do Windows (`C:\Windows\Logs`) e relatorios de erro (**WER**)
-  - Caches de **Edge**, **Chrome** e **Firefox**
-  - **Lixeira** e limpeza de **cache DNS**
-- Tela final apos `cls`: cabecalho com autor/versao/inicio/termino, relatorio completo, resultado em disco e menu de agendamento
-- **Espaco ganho** calculado a partir dos valores exibidos em GB (Antes/Depois), alinhado ao relatorio na tela
+- **Auto-atualizacao**: ao pressionar [S], o executavel em `C:\Windows\LimpezaWindows.exe` passa a ser substituido de forma confiavel (rename + copy + verificacao de versao) antes de reiniciar
+- Modulo **`LimpezaUpdate.ps1`** isolado, copiado para `%ProgramData%\LimpezaWindows\` e para `C:\Windows\` na instalacao
+- Verificacao de atualizacao ocorre **antes** da copia de instalacao, evitando sobrescrever uma versao nova com arquivos antigos
+- Log de falhas em `%ProgramData%\LimpezaWindows\logs\update-*.log`
 
-### Mantido da v2.1.0
+### Testes
 
-- Caches de desenvolvimento (Node, Python, Docker)
-- Relatorio por categoria com status (Limpo, Ignorado, Parcial, Erro, Pulado)
-- Agendamento automatico no Agendador de Tarefas
-- Logs em execucao agendada: `%ProgramData%\LimpezaWindows\logs\`
+- `tests/Test-LimpezaUpdate.ps1` (12 cenarios) executado automaticamente no build
+
+### Novidades da v2.2.0
+
+- 11 etapas de limpeza (Windows Update, navegadores, lixeira, DNS, etc.)
+- Tela final com relatorio e espaco ganho alinhado aos valores exibidos
 
 ### Como usar
 

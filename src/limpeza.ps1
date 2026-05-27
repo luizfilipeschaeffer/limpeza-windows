@@ -8,10 +8,10 @@ param(
     [switch]$SkipDocker
 )
 
-# Limpeza Avancada do Windows v2.2.0
+# Limpeza Avancada do Windows v2.2.1
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.2.0'
+$AppVersion = '2.2.1'
 $script:CleanupLog = [System.Collections.Generic.List[object]]::new()
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
@@ -59,6 +59,18 @@ $script:GitHubApiHeaders = @{
 $script:UpdateAssetName = 'LimpezaWindows.exe'
 $script:ShortcutFileName = 'Limpeza Avancada do Windows.lnk'
 $script:ScheduledTaskName = 'Limpeza Avancada do Windows'
+
+#region LimpezaUpdateLoader
+$script:LimpezaUpdateModulePath = Join-Path $PSScriptRoot 'LimpezaUpdate.ps1'
+if (-not (Test-Path -LiteralPath $script:LimpezaUpdateModulePath) -and $PSCommandPath) {
+    $script:LimpezaUpdateModulePath = Join-Path (Split-Path -Parent $PSCommandPath) 'LimpezaUpdate.ps1'
+}
+if (-not (Test-Path -LiteralPath $script:LimpezaUpdateModulePath)) {
+    throw "Modulo de atualizacao obrigatorio ausente: $($script:LimpezaUpdateModulePath)"
+}
+. $script:LimpezaUpdateModulePath
+Sync-LimpezaUpdateModule -SourceModulePath $script:LimpezaUpdateSelfPath | Out-Null
+#endregion
 
 function Get-ScheduleTimeOptions {
     0..7 | ForEach-Object {
@@ -127,16 +139,7 @@ function Get-ExecutableSourcePath {
 
 function Get-FileVersionLabel {
     param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) { return $AppVersion }
-    $fileVersion = (Get-Item -LiteralPath $Path).VersionInfo.ProductVersion
-    if (-not $fileVersion) { return $AppVersion }
-
-    $parts = $fileVersion.Split('.')
-    if ($parts.Count -ge 3) {
-        return "$($parts[0]).$($parts[1]).$($parts[2])"
-    }
-    return $fileVersion
+    Get-LimpezaFileVersionLabel -Path $Path -FallbackVersion $AppVersion
 }
 
 function Set-DesktopShortcut {
@@ -200,6 +203,8 @@ function Invoke-SystemInstallAndShortcut {
         $ErrorActionPreference = $prevError
     }
 
+    Install-LimpezaUpdateModuleBesideExecutable -TargetDirectory $env:SystemRoot | Out-Null
+
     try {
         Set-DesktopShortcut -TargetPath $systemPath
     }
@@ -225,218 +230,6 @@ function Invoke-SystemInstallAndShortcut {
         Write-Host ''
         Start-Process -FilePath $systemPath -WorkingDirectory $env:SystemRoot
         exit 0
-    }
-}
-
-function Get-AppInstallInfo {
-    $systemPath = Get-SystemInstallPath
-    $runningExe = $PSCommandPath -match '\.exe$'
-    $executablePath = if (Test-Path -LiteralPath $systemPath) {
-        $systemPath
-    }
-    elseif ($runningExe) {
-        $PSCommandPath
-    }
-    else {
-        Join-Path (Split-Path $PSScriptRoot -Parent) "dist\$script:UpdateAssetName"
-    }
-
-    return [PSCustomObject]@{
-        Mode             = if ($runningExe) { 'exe' } else { 'script' }
-        ExecutablePath   = $executablePath
-        InstallDirectory = $env:SystemRoot
-        CurrentVersion   = Get-FileVersionLabel -Path $executablePath
-    }
-}
-
-function Get-GitHubLatestRelease {
-    $uri = "https://api.github.com/repos/$GitHubRepo/releases/latest"
-    $release = Invoke-RestMethod -Uri $uri -Headers $script:GitHubApiHeaders -TimeoutSec 12 -UseBasicParsing
-    $version = ($release.tag_name -replace '^v', '').Trim()
-    $asset = $release.assets | Where-Object { $_.name -eq $script:UpdateAssetName } | Select-Object -First 1
-    if (-not $asset) {
-        throw "Arquivo '$($script:UpdateAssetName)' nao encontrado na release $($release.tag_name)."
-    }
-    [PSCustomObject]@{
-        Version      = $version
-        Tag          = $release.tag_name
-        DownloadUrl  = $asset.browser_download_url
-        ReleaseUrl   = $release.html_url
-        PublishedAt  = $release.published_at
-    }
-}
-
-function Read-UpdateChoice {
-    while ($true) {
-        Write-Host ''
-        Write-Host "   $(E 0x2753)  [S] Sim — baixar e reiniciar com a nova versao" -ForegroundColor White
-        Write-Host "   $(E 0x23ED)  [N] Nao — continuar a limpeza agora" -ForegroundColor White
-        Write-Host ''
-        Write-Host -NoNewline '   Digite S ou N e pressione Enter: ' -ForegroundColor Yellow
-
-        $answer = (Read-Host).Trim().ToUpperInvariant()
-        if ($answer -in @('S', 'SIM', 'Y', 'YES')) { return $true }
-        if ($answer -in @('N', 'NAO', 'NÃO', 'NO')) { return $false }
-        Write-Host '   Opcao invalida. Use S para atualizar ou N para continuar.' -ForegroundColor Red
-    }
-}
-
-function Start-AppUpdateAndRestart {
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Release,
-
-        [Parameter(Mandatory = $true)]
-        [object]$Install,
-
-        [string]$RestartArgument = ''
-    )
-
-    $targetExe = Get-SystemInstallPath
-    $targetDir = $env:SystemRoot
-    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-
-    $stagingExe = Join-Path $env:TEMP "LimpezaWindows-$([guid]::NewGuid().ToString('N')).exe"
-    if (-not $ScheduledRun) {
-        Write-Host ''
-        Write-Host "   $(E 0x1F4E5) Baixando $($script:UpdateAssetName) v$($Release.Version)..." -ForegroundColor Cyan
-    }
-    $prevProgress = $ProgressPreference
-    $ProgressPreference = if ($ScheduledRun) { 'SilentlyContinue' } else { 'Continue' }
-    try {
-        Invoke-WebRequest -Uri $Release.DownloadUrl -OutFile $stagingExe -UseBasicParsing
-    }
-    finally {
-        $ProgressPreference = $prevProgress
-    }
-
-    if (-not (Test-Path $stagingExe)) {
-        throw 'Download da atualizacao falhou.'
-    }
-
-    $pidAtStart = $PID
-    $helperPs1 = Join-Path $env:TEMP "limpeza-updater-$([guid]::NewGuid().ToString('N')).ps1"
-    $shortcutName = $script:ShortcutFileName.Replace("'", "''")
-    $systemRoot = $env:SystemRoot.Replace("'", "''")
-    $launchLine = if ($RestartArgument) {
-        "Start-Process -FilePath `$target -ArgumentList '$($RestartArgument.Replace("'", "''"))' -WorkingDirectory '$systemRoot'"
-    } else {
-        "Start-Process -FilePath `$target -WorkingDirectory '$systemRoot'"
-    }
-    $helperContent = @"
-`$ErrorActionPreference = 'Stop'
-`$staging = '$($stagingExe.Replace("'", "''"))'
-`$target = '$($targetExe.Replace("'", "''"))'
-`$parentPid = $pidAtStart
-
-try {
-    Wait-Process -Id `$parentPid -ErrorAction SilentlyContinue
-} catch {}
-Start-Sleep -Seconds 2
-
-if (Test-Path `$target) {
-    Remove-Item -LiteralPath `$target -Force -ErrorAction SilentlyContinue
-    `$retries = 0
-    while ((Test-Path `$target) -and (`$retries -lt 15)) {
-        Start-Sleep -Milliseconds 400
-        `$retries++
-    }
-}
-Move-Item -LiteralPath `$staging -Destination `$target -Force
-
-`$desktop = [Environment]::GetFolderPath('Desktop')
-if (`$desktop) {
-    `$shortcutPath = Join-Path `$desktop '$shortcutName'
-    `$shell = New-Object -ComObject WScript.Shell
-    `$shortcut = `$shell.CreateShortcut(`$shortcutPath)
-    `$shortcut.TargetPath = `$target
-    `$shortcut.WorkingDirectory = '$systemRoot'
-    `$shortcut.Description = 'Limpeza Avancada do Windows'
-    `$shortcut.IconLocation = "`$target,0"
-    `$shortcut.Save()
-}
-
-$launchLine
-"@
-    Set-Content -Path $helperPs1 -Value $helperContent -Encoding UTF8
-
-    if ($ScheduledRun) {
-        Write-Host "   $(E 0x2705) Atualizacao v$($Release.Version) aplicada. Reiniciando limpeza agendada..." -ForegroundColor DarkCyan
-        Write-Host ''
-    }
-    else {
-        Write-Host "   $(E 0x2705) Download concluido. Reiniciando com v$($Release.Version)..." -ForegroundColor Green
-        Write-Host '   A limpeza iniciara automaticamente na nova versao.' -ForegroundColor DarkGray
-        Write-Host ''
-    }
-
-    Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $helperPs1) `
-        -WindowStyle Hidden
-
-    exit 0
-}
-
-function Invoke-AppUpdateCheck {
-    if ($env:LIMPEZA_SKIP_UPDATE -eq '1') { return }
-
-    $install = Get-AppInstallInfo
-    $currentVersion = $install.CurrentVersion
-
-    try {
-        $release = Get-GitHubLatestRelease
-    }
-    catch {
-        if (-not $ScheduledRun) {
-            Write-Host ''
-            Write-Host "   $(E 0x26A0) Nao foi possivel verificar atualizacoes. Continuando..." -ForegroundColor DarkYellow
-            Write-Host ''
-        }
-        return
-    }
-
-    if ([version]$release.Version -le [version]$currentVersion) {
-        return
-    }
-
-    if ($ScheduledRun) {
-        Write-Host "   $(E 0x1F4E5) Nova versao v$($release.Version) detectada (atual: v$currentVersion). Atualizando automaticamente..." -ForegroundColor Cyan
-        Write-Host ''
-        try {
-            Start-AppUpdateAndRestart -Release $release -Install $install -RestartArgument '-ScheduledRun'
-        }
-        catch {
-            Write-Host "   $(E 0x26A0) Falha na atualizacao automatica. Continuando com v$currentVersion..." -ForegroundColor DarkYellow
-            Write-Host ''
-        }
-        return
-    }
-
-    Write-Host ''
-    Write-Host '  ======================================================' -ForegroundColor Yellow
-    Write-Host "   $(E 0x1F4E5)  ATUALIZACAO DISPONIVEL" -ForegroundColor Yellow
-    Write-Host '  ======================================================' -ForegroundColor Yellow
-    Write-Host ''
-    Write-Host "   Versao instalada : v$currentVersion" -ForegroundColor White
-    Write-Host "   Versao no GitHub : v$($release.Version) ($($release.Tag))" -ForegroundColor Green
-    Write-Host "   Publicada em     : $($release.PublishedAt)" -ForegroundColor DarkGray
-    Write-Host "   Detalhes         : $($release.ReleaseUrl)" -ForegroundColor DarkCyan
-
-    if (Read-UpdateChoice) {
-        try {
-            Start-AppUpdateAndRestart -Release $release -Install $install
-        }
-        catch {
-            Write-Host ''
-            Write-Host "   $(E 0x274C) Falha ao atualizar: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host '   Continuando com a versao atual...' -ForegroundColor DarkYellow
-            Write-Host ''
-        }
-    }
-    else {
-        Write-Host ''
-        Write-Host "   $(E 0x25B6) Continuando com v$currentVersion..." -ForegroundColor DarkCyan
-        Write-Host ''
     }
 }
 
@@ -1218,10 +1011,35 @@ else {
 
 if (-not $ScheduledRun) {
     Show-IntroAnimation
-    Invoke-SystemInstallAndShortcut
 }
 
-Invoke-AppUpdateCheck
+$script:DistFallbackExe = Join-Path (Split-Path $PSScriptRoot -Parent) "dist\$script:UpdateAssetName"
+
+Invoke-LimpezaAppUpdateCheck `
+    -Repo $GitHubRepo `
+    -AssetName $script:UpdateAssetName `
+    -AppVersion $AppVersion `
+    -DistFallbackPath $script:DistFallbackExe `
+    -CommandPath $PSCommandPath `
+    -ApiHeaders $script:GitHubApiHeaders `
+    -ShortcutName $script:ShortcutFileName `
+    -ScheduledRun:$ScheduledRun `
+    -WriteUpdatePrompt {
+        param($Install, $Release)
+        Write-Host ''
+        Write-Host '  ======================================================' -ForegroundColor Yellow
+        Write-Host ("   $(E 0x1F4E5)  ATUALIZACAO DISPONIVEL") -ForegroundColor Yellow
+        Write-Host '  ======================================================' -ForegroundColor Yellow
+        Write-Host ''
+        Write-Host "   Versao instalada : v$($Install.CurrentVersion)" -ForegroundColor White
+        Write-Host "   Versao no GitHub : v$($Release.Version) ($($Release.Tag))" -ForegroundColor Green
+        Write-Host "   Publicada em     : $($Release.PublishedAt)" -ForegroundColor DarkGray
+        Write-Host "   Detalhes         : $($Release.ReleaseUrl)" -ForegroundColor DarkCyan
+    }
+
+if (-not $ScheduledRun) {
+    Invoke-SystemInstallAndShortcut
+}
 
 $startTime  = Get-Date
 $freeBefore = Get-DriveCFreeBytes
