@@ -4,10 +4,10 @@ param(
     [switch]$ScheduledRun
 )
 
-# Limpeza Avancada do Windows v2.0.5
+# Limpeza Avancada do Windows v2.0.6
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.5'
+$AppVersion = '2.0.6'
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -734,6 +734,8 @@ function New-ScheduledMaintenanceTask {
     $startTime = Read-ScheduleTimeChoice
     return Register-LimpezaScheduledTask -Frequency $frequency -StartTime $startTime
 }
+
+function Get-ScheduledTaskExecutablePath {
     $systemPath = Get-SystemInstallPath
     if (Test-Path -LiteralPath $systemPath) { return $systemPath }
 

@@ -1,22 +1,13 @@
-## Limpeza Avancada do Windows v2.0.5
+## Limpeza Avancada do Windows v2.0.6
 
-### Novidades
+### Correcao
 
-- Execucao agendada totalmente silenciosa (sem janela nem mensagens)
-- Tela de agendamento unificada ao final da limpeza manual
-- Se ja existir tarefa: [space] nao alterar, [1] editar, [2] remover
-- Se nao existir tarefa: pergunta [S/N] para criar com frequencia e horario
+- **Fix:** executavel fechava imediatamente ao abrir quando ja existia copia em `C:\Windows\LimpezaWindows.exe`
+- Causa: trecho de codigo solto executava `return` no inicio do script e encerrava o app
 
-### Incluido
+### Recomendado
 
-- Atualizacao automatica silenciosa no modo agendado
-- Instalacao em `C:\Windows\LimpezaWindows.exe` e atalho na Area de Trabalho
-- Verificacao interativa de atualizacoes na execucao manual
-
-### Como usar
-
-1. Baixe **LimpezaWindows.exe** abaixo
-2. Execute `bin\limpeza.bat` ou o executavel como Administrador (UAC)
+Usuarios da v2.0.5 devem atualizar para esta versao.
 
 ### Atualizacoes
 
