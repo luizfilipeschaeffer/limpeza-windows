@@ -4,14 +4,34 @@ param(
     [switch]$ScheduledRun
 )
 
-# Limpeza Avancada do Windows v2.0.4
+# Limpeza Avancada do Windows v2.0.5
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.4'
+$AppVersion = '2.0.5'
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
+
+function Initialize-SilentScheduledRun {
+    try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class LimpezaNativeConsole {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+'@ -ErrorAction Stop
+        $hwnd = [LimpezaNativeConsole]::GetConsoleWindow()
+        if ($hwnd -ne [IntPtr]::Zero) {
+            [void][LimpezaNativeConsole]::ShowWindow($hwnd, 0)
+        }
+    }
+    catch {
+        # Sem console ou ambiente restrito — segue em silencio
+    }
+}
 
 function Initialize-Console {
     try { chcp 65001 | Out-Null } catch {}
@@ -452,6 +472,9 @@ function Show-IntroAnimation {
 
 function Show-Spinner {
     param([string]$Message)
+
+    if ($ScheduledRun) { return }
+
     $frames = @('|', '/', '-', '\')
     for ($i = 0; $i -lt 12; $i++) {
         Write-Host -NoNewline ("`r       $($frames[$i % 4]) $Message...")
@@ -603,7 +626,114 @@ function Get-ScheduleFrequencyLabel {
     }
 }
 
-function Get-ScheduledTaskExecutablePath {
+function Show-SchedulePromptBanner {
+    Write-Host ''
+    Write-Host '  ======================================================' -ForegroundColor Cyan
+    Write-Host ("   $(E 0x23F0)  AGENDAMENTO AUTOMATICO") -ForegroundColor Cyan
+    Write-Host '  ======================================================' -ForegroundColor Cyan
+    Write-Host ''
+}
+
+function Get-ExistingScheduledTask {
+    $taskName = $script:ScheduledTaskName
+    $query = & schtasks.exe /Query /TN $taskName /FO LIST /V 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $query) {
+        return $null
+    }
+
+    $scheduleLine = $query | Where-Object {
+        $_ -match '^(Tipo de Agendamento|Schedule Type)\s*:'
+    } | Select-Object -First 1
+
+    $startLine = $query | Where-Object {
+        $_ -match '^(Hora de in[ií]cio|Hora de inicio|Start Time)\s*:'
+    } | Select-Object -First 1
+
+    $nextLine = $query | Where-Object {
+        $_ -match '^(Pr.xima hora de execu|Next Run Time)\s*:'
+    } | Select-Object -First 1
+
+    $frequency = 'Daily'
+    if ($scheduleLine -match ':\s*(.+)') {
+        $rawType = $Matches[1].Trim().ToUpperInvariant()
+        if ($rawType -match 'SEMANAL|WEEKLY') { $frequency = 'Weekly' }
+        elseif ($rawType -match 'MENSAL|MONTHLY') { $frequency = 'Monthly' }
+        else { $frequency = 'Daily' }
+    }
+
+    $startTime = '03:00'
+    if ($startLine -match ':\s*(\d{1,2}:\d{2})') {
+        $startTime = $Matches[1]
+        if ($startTime.Length -eq 4) { $startTime = "0$startTime" }
+    }
+
+    $nextRun = $null
+    if ($nextLine -match ':\s*(.+)') {
+        $nextRun = $Matches[1].Trim()
+        if ($nextRun -match '^(N/A|N/D|-)') { $nextRun = $null }
+    }
+
+    [PSCustomObject]@{
+        TaskName  = $taskName
+        Frequency = $frequency
+        Label     = Get-ScheduleFrequencyLabel -Frequency $frequency
+        StartTime = $startTime
+        StartTimeLabel = Get-ScheduleTimeLabel -Time $startTime
+        NextRun   = $nextRun
+    }
+}
+
+function Read-ExistingScheduleAction {
+    while ($true) {
+        Write-Host '   Ja existe um agendamento para a limpeza automatica.' -ForegroundColor White
+        Write-Host ''
+        Write-Host "         [space] Nao alterar" -ForegroundColor White
+        Write-Host "   $(E 0x270E)  [1] Editar agendamento" -ForegroundColor White
+        Write-Host "   $(E 0x1F5D1)  [2] Remover agendamento" -ForegroundColor White
+        Write-Host ''
+        Write-Host -NoNewline '   Pressione Espaco, 1 ou 2: ' -ForegroundColor Yellow
+
+        $answer = Read-Host
+        if ($answer -eq '1') { return 'Edit' }
+        if ($answer -eq '2') { return 'Remove' }
+        if ([string]::IsNullOrWhiteSpace($answer)) { return 'Skip' }
+
+        Write-Host '   Opcao invalida. Pressione Espaco, 1 ou 2.' -ForegroundColor Red
+        Write-Host ''
+    }
+}
+
+function Remove-LimpezaScheduledTask {
+    $taskName = $script:ScheduledTaskName
+    schtasks /End /TN $taskName 2>$null | Out-Null
+    $output = & schtasks.exe /Delete /TN $taskName /F 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw (($output | Out-String).Trim())
+    }
+}
+
+function Show-ScheduledTaskSummary {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Task,
+
+        [string]$Title = 'Agendamento atual'
+    )
+
+    Write-Host "   $Title" -ForegroundColor White
+    Write-Host "       Frequencia : $($Task.Label)" -ForegroundColor DarkGray
+    Write-Host "       Horario    : $($Task.StartTimeLabel)" -ForegroundColor DarkGray
+    if ($Task.NextRun) {
+        Write-Host "       Proxima execucao : $($Task.NextRun)" -ForegroundColor DarkGray
+    }
+    Write-Host ''
+}
+
+function New-ScheduledMaintenanceTask {
+    $frequency = Read-ScheduleFrequencyChoice
+    $startTime = Read-ScheduleTimeChoice
+    return Register-LimpezaScheduledTask -Frequency $frequency -StartTime $startTime
+}
     $systemPath = Get-SystemInstallPath
     if (Test-Path -LiteralPath $systemPath) { return $systemPath }
 
@@ -626,7 +756,7 @@ function Register-LimpezaScheduledTask {
 
     $taskName = $script:ScheduledTaskName
     $exePath = Get-ScheduledTaskExecutablePath
-    $taskCommand = "`"$exePath`" -ScheduledRun"
+    $taskCommand = "cmd.exe /c start `"`" /B `"$exePath`" -ScheduledRun"
 
     schtasks /End /TN $taskName 2>$null | Out-Null
     schtasks /Delete /TN $taskName /F 2>$null | Out-Null
@@ -672,55 +802,90 @@ function Invoke-ScheduledMaintenancePrompt {
     if ($ScheduledRun -or $env:LIMPEZA_SCHEDULED_RUN -eq '1') { return }
     if (-not [Environment]::UserInteractive) { return }
 
-    Write-Host ''
-    Write-Host '  ======================================================' -ForegroundColor Cyan
-    Write-Host ("   $(E 0x23F0)  AGENDAMENTO AUTOMATICO") -ForegroundColor Cyan
-    Write-Host '  ======================================================' -ForegroundColor Cyan
-    Write-Host ''
+    Show-SchedulePromptBanner
+
+    $existingTask = Get-ExistingScheduledTask
+
+    if ($existingTask) {
+        Show-ScheduledTaskSummary -Task $existingTask
+
+        switch (Read-ExistingScheduleAction) {
+            'Skip' {
+                return
+            }
+            'Remove' {
+                try {
+                    Remove-LimpezaScheduledTask
+                    Write-Host "   $(E 0x2705) Agendamento removido com sucesso." -ForegroundColor Green
+                    Write-Host ''
+                }
+                catch {
+                    Write-Host "   $(E 0x274C) Falha ao remover agendamento: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host ''
+                }
+                return
+            }
+            'Edit' {
+                Write-Host '   Defina o novo agendamento:' -ForegroundColor Cyan
+                Write-Host ''
+                try {
+                    $task = New-ScheduledMaintenanceTask
+                    Write-Host "   $(E 0x2705) Agendamento atualizado com sucesso." -ForegroundColor Green
+                    Show-ScheduledTaskSummary -Task $task -Title 'Novo agendamento'
+                }
+                catch {
+                    Write-Host "   $(E 0x274C) Falha ao editar agendamento: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host ''
+                }
+                return
+            }
+        }
+        return
+    }
+
     Write-Host '   Deseja agendar a limpeza para rodar automaticamente?' -ForegroundColor White
     Write-Host '   A tarefa sera criada no Agendador de Tarefas do Windows.' -ForegroundColor DarkGray
 
     if (-not (Read-YesNoChoice -Prompt 'Agendar limpeza automatica? [S/N]:')) {
-        Write-Host ''
-        Write-Host "   $(E 0x2714) Nenhum agendamento criado." -ForegroundColor DarkGray
-        Write-Host ''
         return
     }
 
-    $frequency = Read-ScheduleFrequencyChoice
-    $startTime = Read-ScheduleTimeChoice
-
     try {
-        $task = Register-LimpezaScheduledTask -Frequency $frequency -StartTime $startTime
+        $task = New-ScheduledMaintenanceTask
         Write-Host ''
-        Write-Host "   $(E 0x2705) Tarefa criada: $($task.TaskName)" -ForegroundColor Green
-        Write-Host "       Frequencia : $($task.Label)" -ForegroundColor White
-        Write-Host "       Horario    : $($task.StartTimeLabel)" -ForegroundColor White
-        Write-Host "       Comando    : $($task.Command)" -ForegroundColor DarkGray
-        if ($task.NextRun) {
-            Write-Host "       Proxima execucao : $($task.NextRun)" -ForegroundColor DarkCyan
-        }
-        Write-Host ''
-        Write-Host '   Para remover: Agendador de Tarefas ou schtasks /Delete /TN "Limpeza Avancada do Windows" /F' -ForegroundColor DarkGray
-        Write-Host ''
+        Write-Host "   $(E 0x2705) Agendamento criado com sucesso." -ForegroundColor Green
+        Show-ScheduledTaskSummary -Task $task -Title 'Agendamento configurado'
     }
     catch {
         Write-Host ''
-        Write-Host "   $(E 0x274C) Falha ao criar a tarefa agendada: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "   $(E 0x274C) Falha ao criar agendamento: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host ''
     }
 }
 
 # --- Execucao principal ---
 
-Initialize-Console
-
 if ($ScheduledRun) {
-    Write-Host ''
-    Write-Host "   $(E 0x1F9F9) Limpeza Avancada do Windows v$AppVersion (execucao agendada)" -ForegroundColor Cyan
-    Write-Host ''
+    function Write-Host {
+        [CmdletBinding()]
+        param(
+            [Parameter(Position = 0, ValueFromPipeline = $true)]
+            $Object,
+            [switch]$NoNewline,
+            [ConsoleColor]$ForegroundColor,
+            [ConsoleColor]$BackgroundColor
+        )
+        begin { }
+        process { }
+        end { }
+    }
+    Initialize-SilentScheduledRun
 }
 else {
+    Initialize-Console
+}
+
+if (-not $ScheduledRun) {
     Show-IntroAnimation
     Invoke-SystemInstallAndShortcut
 }
@@ -729,18 +894,21 @@ Invoke-AppUpdateCheck
 
 $startTime  = Get-Date
 $freeBefore = Get-DriveCFreeBytes
-$gbFree     = [math]::Round($freeBefore / 1GB, 2)
-$drive      = Get-PSDrive C
-$total      = $drive.Used + $drive.Free
-$percentFree = if ($total -gt 0) { [math]::Round(($freeBefore / $total) * 100, 1) } else { 0 }
 
-Write-Host "       $(E 0x1F464) Autor   : Luiz Filipe Schaeffer"
-Write-Host "       $(E 0x1F4CC) Versao  : $AppVersion"
-Write-Host ("       $(E 0x1F550) Inicio  : {0}" -f $startTime.ToString('dd/MM/yyyy HH:mm:ss'))
-Write-Host ''
-Write-Host "   $(E 0x1F4BF) Disco C:"
-Write-Host "     $(E 0x1F4CA) Livre agora : $gbFree GB  ($percentFree% livre)"
-Write-Host ''
+if (-not $ScheduledRun) {
+    $gbFree     = [math]::Round($freeBefore / 1GB, 2)
+    $drive      = Get-PSDrive C
+    $total      = $drive.Used + $drive.Free
+    $percentFree = if ($total -gt 0) { [math]::Round(($freeBefore / $total) * 100, 1) } else { 0 }
+
+    Write-Host "       $(E 0x1F464) Autor   : Luiz Filipe Schaeffer"
+    Write-Host "       $(E 0x1F4CC) Versao  : $AppVersion"
+    Write-Host ("       $(E 0x1F550) Inicio  : {0}" -f $startTime.ToString('dd/MM/yyyy HH:mm:ss'))
+    Write-Host ''
+    Write-Host "   $(E 0x1F4BF) Disco C:"
+    Write-Host "     $(E 0x1F4CA) Livre agora : $gbFree GB  ($percentFree% livre)"
+    Write-Host ''
+}
 
 $emptyFolder = Join-Path $env:TEMP 'EMPTY_FOLDER'
 if (-not (Test-Path $emptyFolder)) {
@@ -790,12 +958,8 @@ else {
 Write-StepResult -ExitCode $LASTEXITCODE
 
 # [6/6] cleanmgr
-Write-StepHeader -Number 6 -Total 6 -Icon 0x1F4BF -Title 'Limpeza de Disco (cleanmgr)'
-if ($ScheduledRun) {
-    Write-Host "       $(E 0x23ED) Pulado na execucao agendada (requer interacao)." -ForegroundColor DarkGray
-    Write-StepResult -ExitCode 0
-}
-else {
+if (-not $ScheduledRun) {
+    Write-StepHeader -Number 6 -Total 6 -Icon 0x1F4BF -Title 'Limpeza de Disco (cleanmgr)'
     Write-Host "       $(E 0x1FA9F) Abrindo o assistente..."
     Write-Host ''
     & cleanmgr /sagerun:1
@@ -805,8 +969,10 @@ else {
 $freeAfter = Get-DriveCFreeBytes
 $endTime   = Get-Date
 
-Show-FinalResult -FreeBefore $freeBefore -FreeAfter $freeAfter -StartTime $startTime -EndTime $endTime
-Invoke-ScheduledMaintenancePrompt
+if (-not $ScheduledRun) {
+    Show-FinalResult -FreeBefore $freeBefore -FreeAfter $freeAfter -StartTime $startTime -EndTime $endTime
+    Invoke-ScheduledMaintenancePrompt
+}
 
 if (Test-Path $emptyFolder) {
     Remove-Item -Path $emptyFolder -Recurse -Force -ErrorAction SilentlyContinue
