@@ -19,7 +19,7 @@ Na primeira execução, o app copia o executável para `C:\Windows\LimpezaWindow
 
 Ao iniciar, o app verifica atualizações no GitHub. Se houver versão mais nova, pergunta se deseja baixar e reiniciar; caso contrário, segue com a limpeza. Para pular a verificação: `$env:LIMPEZA_SKIP_UPDATE = '1'`.
 
-Ao terminar, é possível agendar a limpeza (1x ao dia, 1x na semana ou 1x no mês) e escolher o horário em intervalos de 3 horas (00:00 a 21:00), via Agendador de Tarefas do Windows.
+Ao terminar (execução manual), é possível agendar a limpeza (1x ao dia, 1x na semana ou 1x no mês) e escolher o horário em intervalos de 3 horas (00:00 a 21:00). Na execução agendada, atualizações são aplicadas automaticamente, sem prompt.
 
 ## Baixar a última versão
 

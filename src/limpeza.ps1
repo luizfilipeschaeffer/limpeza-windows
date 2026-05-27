@@ -4,10 +4,10 @@ param(
     [switch]$ScheduledRun
 )
 
-# Limpeza Avancada do Windows v2.0.3
+# Limpeza Avancada do Windows v2.0.4
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.3'
+$AppVersion = '2.0.4'
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -262,7 +262,9 @@ function Start-AppUpdateAndRestart {
         [object]$Release,
 
         [Parameter(Mandatory = $true)]
-        [object]$Install
+        [object]$Install,
+
+        [string]$RestartArgument = ''
     )
 
     $targetExe = Get-SystemInstallPath
@@ -270,10 +272,12 @@ function Start-AppUpdateAndRestart {
     New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 
     $stagingExe = Join-Path $env:TEMP "LimpezaWindows-$([guid]::NewGuid().ToString('N')).exe"
-    Write-Host ''
-    Write-Host "   $(E 0x1F4E5) Baixando $($script:UpdateAssetName) v$($Release.Version)..." -ForegroundColor Cyan
+    if (-not $ScheduledRun) {
+        Write-Host ''
+        Write-Host "   $(E 0x1F4E5) Baixando $($script:UpdateAssetName) v$($Release.Version)..." -ForegroundColor Cyan
+    }
     $prevProgress = $ProgressPreference
-    $ProgressPreference = 'Continue'
+    $ProgressPreference = if ($ScheduledRun) { 'SilentlyContinue' } else { 'Continue' }
     try {
         Invoke-WebRequest -Uri $Release.DownloadUrl -OutFile $stagingExe -UseBasicParsing
     }
@@ -289,6 +293,11 @@ function Start-AppUpdateAndRestart {
     $helperPs1 = Join-Path $env:TEMP "limpeza-updater-$([guid]::NewGuid().ToString('N')).ps1"
     $shortcutName = $script:ShortcutFileName.Replace("'", "''")
     $systemRoot = $env:SystemRoot.Replace("'", "''")
+    $launchLine = if ($RestartArgument) {
+        "Start-Process -FilePath `$target -ArgumentList '$($RestartArgument.Replace("'", "''"))' -WorkingDirectory '$systemRoot'"
+    } else {
+        "Start-Process -FilePath `$target -WorkingDirectory '$systemRoot'"
+    }
     $helperContent = @"
 `$ErrorActionPreference = 'Stop'
 `$staging = '$($stagingExe.Replace("'", "''"))'
@@ -322,13 +331,19 @@ if (`$desktop) {
     `$shortcut.Save()
 }
 
-Start-Process -FilePath `$target -WorkingDirectory '$systemRoot'
+$launchLine
 "@
     Set-Content -Path $helperPs1 -Value $helperContent -Encoding UTF8
 
-    Write-Host "   $(E 0x2705) Download concluido. Reiniciando com v$($Release.Version)..." -ForegroundColor Green
-    Write-Host '   A limpeza iniciara automaticamente na nova versao.' -ForegroundColor DarkGray
-    Write-Host ''
+    if ($ScheduledRun) {
+        Write-Host "   $(E 0x2705) Atualizacao v$($Release.Version) aplicada. Reiniciando limpeza agendada..." -ForegroundColor DarkCyan
+        Write-Host ''
+    }
+    else {
+        Write-Host "   $(E 0x2705) Download concluido. Reiniciando com v$($Release.Version)..." -ForegroundColor Green
+        Write-Host '   A limpeza iniciara automaticamente na nova versao.' -ForegroundColor DarkGray
+        Write-Host ''
+    }
 
     Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
         -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $helperPs1) `
@@ -347,13 +362,28 @@ function Invoke-AppUpdateCheck {
         $release = Get-GitHubLatestRelease
     }
     catch {
-        Write-Host ''
-        Write-Host "   $(E 0x26A0) Nao foi possivel verificar atualizacoes. Continuando..." -ForegroundColor DarkYellow
-        Write-Host ''
+        if (-not $ScheduledRun) {
+            Write-Host ''
+            Write-Host "   $(E 0x26A0) Nao foi possivel verificar atualizacoes. Continuando..." -ForegroundColor DarkYellow
+            Write-Host ''
+        }
         return
     }
 
     if ([version]$release.Version -le [version]$currentVersion) {
+        return
+    }
+
+    if ($ScheduledRun) {
+        Write-Host "   $(E 0x1F4E5) Nova versao v$($release.Version) detectada (atual: v$currentVersion). Atualizando automaticamente..." -ForegroundColor Cyan
+        Write-Host ''
+        try {
+            Start-AppUpdateAndRestart -Release $release -Install $install -RestartArgument '-ScheduledRun'
+        }
+        catch {
+            Write-Host "   $(E 0x26A0) Falha na atualizacao automatica. Continuando com v$currentVersion..." -ForegroundColor DarkYellow
+            Write-Host ''
+        }
         return
     }
 
@@ -693,8 +723,9 @@ if ($ScheduledRun) {
 else {
     Show-IntroAnimation
     Invoke-SystemInstallAndShortcut
-    Invoke-AppUpdateCheck
 }
+
+Invoke-AppUpdateCheck
 
 $startTime  = Get-Date
 $freeBefore = Get-DriveCFreeBytes
