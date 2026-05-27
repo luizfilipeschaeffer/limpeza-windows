@@ -1,6 +1,15 @@
 $ErrorActionPreference = 'Stop'
 
 $projectDir = Split-Path $PSScriptRoot -Parent
+$versionFile = Join-Path $projectDir 'VERSION'
+$appVersion = if (Test-Path $versionFile) {
+    (Get-Content $versionFile -Raw).Trim()
+} else {
+    '2.0.0.0'
+}
+if ($appVersion -notmatch '\.\d+$') {
+    $appVersion = "$appVersion.0"
+}
 $buildDir   = Join-Path $projectDir 'tools\ps2exe-build'
 $sourcePs1  = Join-Path $projectDir 'src\limpeza.ps1'
 $iconFile   = Join-Path $projectDir 'assets\limpeza-icon.ico'
@@ -45,7 +54,7 @@ Invoke-ps2exe `
     -company 'Luiz Filipe Schaeffer' `
     -product 'Limpeza Avancada do Windows' `
     -copyright 'Luiz Filipe Schaeffer' `
-    -version '2.0.0.0'
+    -version $appVersion
 
 if (-not (Test-Path $outputExe)) {
     throw 'Falha ao gerar o executavel.'

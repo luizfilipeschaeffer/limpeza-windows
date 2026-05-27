@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build executable
+        shell: pwsh
+        run: ./scripts/build-limpeza.ps1
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          $notes = @"
+          ## Limpeza Avancada do Windows $tag
+
+          - Executavel com icone personalizado e elevacao automatica (UAC)
+          - Limpeza de TEMP, Prefetch, Windows Installer, DISM e cleanmgr
+
+          ### Como usar
+
+          1. Baixe ``LimpezaWindows.exe`` desta release
+          2. Execute como Administrador
+
+          Repositorio: https://github.com/${{ github.repository }}
+          "@
+          $notes | Out-File -FilePath RELEASE_NOTES.md -Encoding utf8
+          gh release create $tag dist/LimpezaWindows.exe `
+            --title "Limpeza Avancada do Windows $tag" `
+            --notes-file RELEASE_NOTES.md

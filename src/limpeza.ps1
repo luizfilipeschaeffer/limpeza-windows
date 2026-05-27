@@ -1,6 +1,9 @@
 #Requires -RunAsAdministrator
-# Limpeza Avancada do Windows v2.0
+# Limpeza Avancada do Windows v2.0.0
 # Autor: Luiz Filipe Schaeffer
+
+$AppVersion = '2.0.0'
+$GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
@@ -17,6 +20,29 @@ function Initialize-Console {
 
 function E([int]$CodePoint) {
     [char]::ConvertFromUtf32($CodePoint)
+}
+
+function Show-GitHubUpdateNotice {
+    param([string]$CurrentVersion = $AppVersion)
+
+    try {
+        $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/$GitHubRepo/releases/latest" `
+            -Headers @{ 'User-Agent' = 'LimpezaWindows'; 'Accept' = 'application/vnd.github+json' } `
+            -TimeoutSec 8 `
+            -UseBasicParsing
+        $latest = ($release.tag_name -replace '^v', '').Trim()
+        if ([version]$latest -gt [version]$CurrentVersion) {
+            Write-Host ''
+            Write-Host "   $(E 0x1F4E5) Nova versao disponivel: v$latest (voce usa v$CurrentVersion)" -ForegroundColor Yellow
+            Write-Host "       $($release.html_url)" -ForegroundColor DarkCyan
+            Write-Host "       Ou execute atualizar.bat na pasta do projeto." -ForegroundColor DarkGray
+            Write-Host ''
+        }
+    }
+    catch {
+        # Sem rede ou sem releases — segue normalmente
+    }
 }
 
 function Write-Banner {
@@ -135,7 +161,7 @@ function Show-FinalResult {
     Write-Host '  ======================================================' -ForegroundColor Cyan
     Write-Host ''
     Write-Host "       $(E 0x1F464) Autor   : Luiz Filipe Schaeffer"
-    Write-Host "       $(E 0x1F4CC) Versao  : 2.0"
+    Write-Host "       $(E 0x1F4CC) Versao  : $AppVersion"
     Write-Host ("       $(E 0x1F550) Inicio  : {0}" -f $StartTime.ToString('dd/MM/yyyy HH:mm:ss'))
     Write-Host ("       $(E 0x1F3C1) Termino : {0}" -f $EndTime.ToString('dd/MM/yyyy HH:mm:ss'))
     Write-Host ''
@@ -148,6 +174,7 @@ function Show-FinalResult {
 
 Initialize-Console
 Show-IntroAnimation
+Show-GitHubUpdateNotice
 
 $startTime  = Get-Date
 $freeBefore = Get-DriveCFreeBytes
@@ -157,7 +184,7 @@ $total      = $drive.Used + $drive.Free
 $percentFree = if ($total -gt 0) { [math]::Round(($freeBefore / $total) * 100, 1) } else { 0 }
 
 Write-Host "       $(E 0x1F464) Autor   : Luiz Filipe Schaeffer"
-Write-Host "       $(E 0x1F4CC) Versao  : 2.0"
+Write-Host "       $(E 0x1F4CC) Versao  : $AppVersion"
 Write-Host ("       $(E 0x1F550) Inicio  : {0}" -f $startTime.ToString('dd/MM/yyyy HH:mm:ss'))
 Write-Host ''
 Write-Host "   $(E 0x1F4BF) Disco C:"
