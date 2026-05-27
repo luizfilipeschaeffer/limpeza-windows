@@ -20,6 +20,7 @@ jobs:
         run: .\scripts\build-limpeza.ps1
 
       - name: Create or update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
