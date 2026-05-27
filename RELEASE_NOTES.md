@@ -1,9 +1,13 @@
-## Limpeza Avancada do Windows v2.0.8
+## Limpeza Avancada do Windows v2.0.9
 
-### Correcao
+### Novidades
 
-- **Fix:** erro ao criar agendamento (`Argumento/opcao invalido - '/B'`)
-- O comando da tarefa agora aponta direto para o executavel com `-ScheduledRun`, sem `cmd /c start /B`
+- Menu de agendamento existente: **[S] Sair** no lugar de Espaco para nao alterar
+- Aceita apenas **S**, **1** ou **2** (demais teclas ignoradas)
+
+### Correcoes recentes
+
+- v2.0.8: criacao de tarefa agendada sem erro `/B` no schtasks
 
 ### Atualizacoes
 

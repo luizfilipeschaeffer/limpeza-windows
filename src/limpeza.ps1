@@ -4,10 +4,10 @@ param(
     [switch]$ScheduledRun
 )
 
-# Limpeza Avancada do Windows v2.0.8
+# Limpeza Avancada do Windows v2.0.9
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.8'
+$AppVersion = '2.0.9'
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -685,28 +685,29 @@ function Get-ExistingScheduledTask {
 
 function Read-ExistingScheduleActionKey {
     Write-Host ''
-    Write-Host -NoNewline '   Pressione Espaco, 1 ou 2: ' -ForegroundColor Yellow
+    Write-Host -NoNewline '   Pressione S, 1 ou 2: ' -ForegroundColor Yellow
 
     while ($true) {
         $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
 
         switch ($key.Key) {
-            'Spacebar' { return 'Skip' }
-            'D1'       { return 'Edit' }
-            'NumPad1'  { return 'Edit' }
-            'D2'       { return 'Remove' }
-            'NumPad2'  { return 'Remove' }
+            'D1'      { return 'Edit' }
+            'NumPad1' { return 'Edit' }
+            'D2'      { return 'Remove' }
+            'NumPad2' { return 'Remove' }
         }
 
-        if ($key.Character -eq '1') { return 'Edit' }
-        if ($key.Character -eq '2') { return 'Remove' }
+        $char = $key.Character.ToString().ToUpperInvariant()
+        if ($char -eq 'S') { return 'Skip' }
+        if ($char -eq '1') { return 'Edit' }
+        if ($char -eq '2') { return 'Remove' }
     }
 }
 
 function Read-ExistingScheduleAction {
     Write-Host '   Ja existe um agendamento para a limpeza automatica.' -ForegroundColor White
     Write-Host ''
-    Write-Host "         [space] Nao alterar" -ForegroundColor White
+    Write-Host "         [S] Sair" -ForegroundColor White
     Write-Host "   $(E 0x270E)  [1] Editar agendamento" -ForegroundColor White
     Write-Host "   $(E 0x1F5D1)  [2] Remover agendamento" -ForegroundColor White
 
