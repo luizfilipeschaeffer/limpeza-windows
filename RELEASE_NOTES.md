@@ -1,23 +1,23 @@
-## Limpeza Avancada do Windows v2.0.2
+## Limpeza Avancada do Windows v2.0.3
 
 ### Novidades
 
-- Instala automaticamente em `C:\Windows\LimpezaWindows.exe` ao executar
-- Cria atalho **Limpeza Avancada do Windows** na Area de Trabalho do usuario
-- Atualizacoes e launcher passam a usar a copia em `C:\Windows`
-- Reorganizacao do projeto: `bin\`, `config\`, `scripts\`
+- Agendamento automatico ao final da limpeza (1x ao dia, 1x na semana ou 1x no mes)
+- Escolha do horario em intervalos de 3 horas (00:00 a 21:00)
+- Tarefa criada no Agendador de Tarefas do Windows com execucao `-ScheduledRun`
+- Modo agendado pula cleanmgr e prompts interativos
 
 ### Incluido
 
-- `LimpezaWindows.exe` — aplicativo com icone personalizado e elevacao UAC
-- Verificacao interativa de atualizacoes no GitHub antes da limpeza
+- Instalacao em `C:\Windows\LimpezaWindows.exe` e atalho na Area de Trabalho
+- Verificacao interativa de atualizacoes no GitHub
 - Limpeza de TEMP, Prefetch, Windows Installer, DISM e cleanmgr
 
 ### Como usar
 
 1. Baixe **LimpezaWindows.exe** abaixo
 2. Execute como Administrador (UAC)
-3. O app instala em `C:\Windows` e cria o atalho na Area de Trabalho
+3. Ao terminar, escolha se deseja agendar a limpeza automatica
 
 ### Atualizacoes
 
