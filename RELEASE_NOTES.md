@@ -1,24 +1,20 @@
-## Limpeza Avancada do Windows v2.2.1
+## Limpeza Avancada do Windows v2.3.0
 
-### Correcoes
+### Novidades
 
-- **Auto-atualizacao**: ao pressionar [S], o executavel em `C:\Windows\LimpezaWindows.exe` passa a ser substituido de forma confiavel (rename + copy + verificacao de versao) antes de reiniciar
-- Modulo **`LimpezaUpdate.ps1`** isolado, copiado para `%ProgramData%\LimpezaWindows\` e para `C:\Windows\` na instalacao
-- Verificacao de atualizacao ocorre **antes** da copia de instalacao, evitando sobrescrever uma versao nova com arquivos antigos
-- Log de falhas em `%ProgramData%\LimpezaWindows\logs\update-*.log`
+- **Menu inicial** antes de qualquer limpeza: escolha continuar, atualizar ou sair
+- **[3] Desinstalar**: remove `C:\Windows\LimpezaWindows.exe`, modulo de update, atalho, tarefa agendada e `%ProgramData%\LimpezaWindows\`
+- Facilita **reinstalar do zero**: desinstale, depois execute novamente `dist\LimpezaWindows.exe` ou baixe do GitHub
 
-### Testes
+### Correcoes (v2.2.x)
 
-- `tests/Test-LimpezaUpdate.ps1` (12 cenarios) executado automaticamente no build
-
-### Novidades da v2.2.0
-
-- 11 etapas de limpeza (Windows Update, navegadores, lixeira, DNS, etc.)
-- Tela final com relatorio e espaco ganho alinhado aos valores exibidos
+- Auto-atualizacao confiavel com modulo `LimpezaUpdate.ps1` isolado
+- Substituicao do executavel com validacao de versao e log em `%ProgramData%\LimpezaWindows\logs\`
 
 ### Como usar
 
-1. Baixe `LimpezaWindows.exe` desta release
+1. Baixe `LimpezaWindows.exe` desta release (recomendado copiar tambem `LimpezaUpdate.ps1` para `C:\Windows\` na primeira instalacao manual)
 2. Execute `bin\limpeza.bat` ou o executavel como **Administrador**
+3. No menu inicial: **1** limpar, **2** atualizar, **3** desinstalar, **0** sair
 
 Repositorio: https://github.com/luizfilipeschaeffer/limpeza-windows

@@ -98,12 +98,17 @@ try {
         -TargetPath $target `
         -ExpectedVersion '0.0.0' `
         -ParentProcessId $PID `
-        -LogPath (Join-Path $tempRoot 'update.log')
+        -LogPath (Join-Path $tempRoot 'update.log') `
+        -ModuleSourcePath $modulePath
 
     Assert-True (Test-Path -LiteralPath $helperPath) 'Helper de atualizacao gerado'
     $helperText = Get-Content -LiteralPath $helperPath -Raw
     Assert-True ($helperText -match 'Install-LimpezaUpdatedExecutable') 'Helper invoca Install-LimpezaUpdatedExecutable'
-    Assert-True ($helperText -match 'ProgramData\\LimpezaWindows\\LimpezaUpdate\.ps1') 'Helper carrega modulo em ProgramData'
+    Assert-True ($helperText -match [regex]::Escape($modulePath)) 'Helper carrega modulo por caminho absoluto valido'
+
+    $fakeExeAsPs1 = Join-Path $tempRoot 'fake-module.ps1'
+    Copy-Item -LiteralPath $v1 -Destination $fakeExeAsPs1 -Force
+    Assert-True (-not (Test-LimpezaUpdateModuleFile -Path $fakeExeAsPs1)) 'Rejeita executavel disfarçado de .ps1'
 
     $syncSource = Join-Path $tempRoot 'LimpezaUpdate.ps1'
     Copy-Item -LiteralPath $modulePath -Destination $syncSource -Force
@@ -111,6 +116,10 @@ try {
 
     $programDataModule = Join-Path (Join-Path $env:ProgramData 'LimpezaWindows') 'LimpezaUpdate.ps1'
     Assert-True (Test-Path -LiteralPath $programDataModule) 'Modulo presente em ProgramData apos Sync'
+
+    $artifacts = Get-LimpezaInstallArtifactPaths -AssetName 'LimpezaWindows.exe'
+    Assert-True ($artifacts.Count -ge 3) 'Lista de artefatos da instalacao definida'
+    Assert-True ($artifacts -contains (Join-Path $env:SystemRoot 'LimpezaWindows.exe')) 'Artefatos incluem executavel do SystemRoot'
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

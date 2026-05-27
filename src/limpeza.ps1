@@ -8,10 +8,10 @@ param(
     [switch]$SkipDocker
 )
 
-# Limpeza Avancada do Windows v2.2.1
+# Limpeza Avancada do Windows v2.3.0
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.2.1'
+$AppVersion = '2.3.0'
 $script:CleanupLog = [System.Collections.Generic.List[object]]::new()
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
@@ -69,7 +69,8 @@ if (-not (Test-Path -LiteralPath $script:LimpezaUpdateModulePath)) {
     throw "Modulo de atualizacao obrigatorio ausente: $($script:LimpezaUpdateModulePath)"
 }
 . $script:LimpezaUpdateModulePath
-Sync-LimpezaUpdateModule -SourceModulePath $script:LimpezaUpdateSelfPath | Out-Null
+$script:LimpezaUpdateSelfPath = $script:LimpezaUpdateModulePath
+Ensure-LimpezaUpdateModuleDeployed -CommandPath $PSCommandPath -ExplicitModulePath $script:LimpezaUpdateModulePath -Repo $GitHubRepo | Out-Null
 #endregion
 
 function Get-ScheduleTimeOptions {
@@ -203,7 +204,13 @@ function Invoke-SystemInstallAndShortcut {
         $ErrorActionPreference = $prevError
     }
 
-    Install-LimpezaUpdateModuleBesideExecutable -TargetDirectory $env:SystemRoot | Out-Null
+    $sourceDir = Split-Path -Parent $sourcePath
+    $moduleBesideSource = Join-Path $sourceDir 'LimpezaUpdate.ps1'
+    if (Test-Path -LiteralPath $moduleBesideSource) {
+        Copy-Item -LiteralPath $moduleBesideSource -Destination (Join-Path $env:SystemRoot 'LimpezaUpdate.ps1') -Force -ErrorAction SilentlyContinue
+    }
+
+    Install-LimpezaUpdateModuleBesideExecutable -TargetDirectory $env:SystemRoot -CommandPath $PSCommandPath -ExplicitModulePath $script:LimpezaUpdateModulePath | Out-Null
 
     try {
         Set-DesktopShortcut -TargetPath $systemPath
@@ -1009,35 +1016,22 @@ else {
     Initialize-Console
 }
 
-if (-not $ScheduledRun) {
-    Show-IntroAnimation
-}
-
 $script:DistFallbackExe = Join-Path (Split-Path $PSScriptRoot -Parent) "dist\$script:UpdateAssetName"
 
-Invoke-LimpezaAppUpdateCheck `
+Invoke-LimpezaStartupDecision `
     -Repo $GitHubRepo `
     -AssetName $script:UpdateAssetName `
     -AppVersion $AppVersion `
     -DistFallbackPath $script:DistFallbackExe `
     -CommandPath $PSCommandPath `
+    -ExplicitModulePath $script:LimpezaUpdateModulePath `
     -ApiHeaders $script:GitHubApiHeaders `
     -ShortcutName $script:ShortcutFileName `
-    -ScheduledRun:$ScheduledRun `
-    -WriteUpdatePrompt {
-        param($Install, $Release)
-        Write-Host ''
-        Write-Host '  ======================================================' -ForegroundColor Yellow
-        Write-Host ("   $(E 0x1F4E5)  ATUALIZACAO DISPONIVEL") -ForegroundColor Yellow
-        Write-Host '  ======================================================' -ForegroundColor Yellow
-        Write-Host ''
-        Write-Host "   Versao instalada : v$($Install.CurrentVersion)" -ForegroundColor White
-        Write-Host "   Versao no GitHub : v$($Release.Version) ($($Release.Tag))" -ForegroundColor Green
-        Write-Host "   Publicada em     : $($Release.PublishedAt)" -ForegroundColor DarkGray
-        Write-Host "   Detalhes         : $($Release.ReleaseUrl)" -ForegroundColor DarkCyan
-    }
+    -ScheduledTaskName $script:ScheduledTaskName `
+    -ScheduledRun:$ScheduledRun
 
 if (-not $ScheduledRun) {
+    Show-IntroAnimation
     Invoke-SystemInstallAndShortcut
 }
 
