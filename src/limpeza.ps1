@@ -1,13 +1,18 @@
 #Requires -RunAsAdministrator
 
 param(
-    [switch]$ScheduledRun
+    [switch]$ScheduledRun,
+    [switch]$SkipDevCaches,
+    [switch]$SkipNode,
+    [switch]$SkipPython,
+    [switch]$SkipDocker
 )
 
-# Limpeza Avancada do Windows v2.0.9
+# Limpeza Avancada do Windows v2.1.0
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.9'
+$AppVersion = '2.1.0'
+$script:CleanupLog = [System.Collections.Generic.List[object]]::new()
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -518,6 +523,239 @@ function Invoke-RobocopyClean {
     return $LASTEXITCODE
 }
 
+function Test-SkipFlag {
+    param(
+        [switch]$Switch,
+        [string]$EnvVarName
+    )
+    if ($Switch) { return $true }
+    if ($EnvVarName -and [Environment]::GetEnvironmentVariable($EnvVarName) -eq '1') { return $true }
+    return $false
+}
+
+function Get-RobocopyLogStatus {
+    param([int]$ExitCode)
+    if ($ExitCode -ge 8) { return 'Parcial' }
+    return 'Limpo'
+}
+
+function Add-CleanupLogEntry {
+    param(
+        [string]$Category,
+        [string]$Target,
+        [ValidateSet('Limpo', 'Ignorado', 'Parcial', 'Erro', 'Pulado')]
+        [string]$Status,
+        [string]$Detail = ''
+    )
+    $script:CleanupLog.Add([PSCustomObject]@{
+            Category = $Category
+            Target   = $Target
+            Status   = $Status
+            Detail   = $Detail
+        })
+}
+
+function Get-CleanupStatusColor {
+    param([string]$Status)
+    switch ($Status) {
+        'Limpo'    { return 'Green' }
+        'Ignorado' { return 'DarkGray' }
+        'Parcial'  { return 'Yellow' }
+        'Erro'     { return 'Red' }
+        'Pulado'   { return 'DarkCyan' }
+        default    { return 'White' }
+    }
+}
+
+function Show-CleanupReport {
+    Write-Host ''
+    Write-Host '  ======================================================' -ForegroundColor Cyan
+    Write-Host ("           $(E 0x1F4CB)  RELATORIO DA LIMPEZA  $(E 0x1F4CB)") -ForegroundColor Cyan
+    Write-Host '  ======================================================' -ForegroundColor Cyan
+    Write-Host ''
+
+    if ($script:CleanupLog.Count -eq 0) {
+        Write-Host '  Nenhum item registrado nesta execucao.' -ForegroundColor DarkGray
+        Write-Host ''
+        return
+    }
+
+    $currentCategory = $null
+    foreach ($entry in $script:CleanupLog) {
+        if ($entry.Category -ne $currentCategory) {
+            $currentCategory = $entry.Category
+            Write-Host ''
+            Write-Host "  [$currentCategory]" -ForegroundColor Cyan
+        }
+        $color = Get-CleanupStatusColor -Status $entry.Status
+        $detailSuffix = if ($entry.Detail) { ' - ' + $entry.Detail } else { '' }
+        Write-Host ('  - {0}' -f $entry.Target) -ForegroundColor White
+        Write-Host ('    [{0}]{1}' -f $entry.Status, $detailSuffix) -ForegroundColor $color
+    }
+
+    $limpo    = @($script:CleanupLog | Where-Object Status -eq 'Limpo').Count
+    $ignorado = @($script:CleanupLog | Where-Object Status -eq 'Ignorado').Count
+    $parcial  = @($script:CleanupLog | Where-Object { $_.Status -in @('Parcial', 'Erro') }).Count
+    $pulado   = @($script:CleanupLog | Where-Object Status -eq 'Pulado').Count
+
+    Write-Host ''
+    Write-Host '  ------------------------------------------------------' -ForegroundColor DarkGray
+    Write-Host ("  Resumo: {0} limpos, {1} ignorados, {2} com aviso/erro, {3} pulados" -f $limpo, $ignorado, $parcial, $pulado) -ForegroundColor White
+    Write-Host ''
+}
+
+function Get-CleanupLogFilePath {
+    $logDir = Join-Path $env:ProgramData 'LimpezaWindows\logs'
+    if (-not (Test-Path -LiteralPath $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    Join-Path $logDir "limpeza-$stamp.log"
+}
+
+function Export-CleanupLogToFile {
+    param(
+        [long]$FreeBefore,
+        [long]$FreeAfter,
+        [datetime]$StartTime,
+        [datetime]$EndTime
+    )
+
+    $culture = [cultureinfo]::GetCultureInfo('pt-BR')
+    $gained  = [math]::Max(0, $FreeAfter - $FreeBefore)
+    $logPath = Get-CleanupLogFilePath
+    $lines   = [System.Collections.Generic.List[string]]::new()
+
+    $lines.Add("Limpeza Avancada do Windows v$AppVersion")
+    $lines.Add("Inicio:  $($StartTime.ToString('dd/MM/yyyy HH:mm:ss'))")
+    $lines.Add("Termino: $($EndTime.ToString('dd/MM/yyyy HH:mm:ss'))")
+    $lines.Add("Execucao agendada (silenciosa)")
+    $lines.Add('')
+    $lines.Add('--- Relatorio ---')
+
+    foreach ($entry in $script:CleanupLog) {
+        $detail = if ($entry.Detail) { ' | ' + $entry.Detail } else { '' }
+        $lines.Add(('[{0}] {1} | {2}{3}' -f $entry.Category, $entry.Target, $entry.Status, $detail))
+    }
+
+    $lines.Add('')
+    $lines.Add('--- Espaco em disco C: ---')
+    $lines.Add(("Antes:  {0} GB" -f (($FreeBefore / 1GB).ToString('N2', $culture))))
+    $lines.Add(("Depois: {0} GB" -f (($FreeAfter / 1GB).ToString('N2', $culture))))
+    $lines.Add(("Ganho:  {0} GB" -f (($gained / 1GB).ToString('N2', $culture))))
+
+    $lines | Set-Content -Path $logPath -Encoding UTF8
+}
+
+function Invoke-FinalSummaryScreen {
+    param(
+        [long]$FreeBefore,
+        [long]$FreeAfter,
+        [datetime]$StartTime,
+        [datetime]$EndTime
+    )
+
+    Clear-Host
+    try { chcp 65001 | Out-Null } catch {}
+    $Host.UI.RawUI.WindowTitle = "$(E 0x1F9F9) Limpeza Avancada do Windows v$AppVersion"
+
+    Write-Host ''
+    Write-Host '  ======================================================' -ForegroundColor Cyan
+    Write-Host ("           $(E 0x1F389)  LIMPEZA CONCLUIDA  $(E 0x1F389)") -ForegroundColor Green
+    Write-Host '  ======================================================' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host "       $(E 0x1F4CC) Versao  : $AppVersion"
+    Write-Host ("       $(E 0x1F3C1) Termino : {0}" -f $EndTime.ToString('dd/MM/yyyy HH:mm:ss'))
+    Write-Host ''
+
+    Show-CleanupReport
+    Show-FinalResult -FreeBefore $FreeBefore -FreeAfter $FreeAfter -StartTime $StartTime -EndTime $EndTime
+    Invoke-ScheduledMaintenancePrompt
+}
+
+function Invoke-CleanupFolderPath {
+    param(
+        [string]$Category,
+        [string]$TargetPath
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetPath)) {
+        Add-CleanupLogEntry -Category $Category -Target $TargetPath -Status 'Ignorado' -Detail 'Pasta ausente ou nao instalado'
+        return
+    }
+
+    $code   = Invoke-RobocopyClean -TargetPath $TargetPath
+    $status = Get-RobocopyLogStatus -ExitCode $code
+    $detail = if ($status -eq 'Parcial') { 'Alguns arquivos em uso ou bloqueados' } else { 'Concluido' }
+    Add-CleanupLogEntry -Category $Category -Target $TargetPath -Status $status -Detail $detail
+}
+
+function Invoke-DevToolCacheClean {
+    $skipNode   = Test-SkipFlag -Switch $SkipNode   -EnvVarName 'LIMPEZA_SKIP_NODE'
+    $skipPython = Test-SkipFlag -Switch $SkipPython -EnvVarName 'LIMPEZA_SKIP_PYTHON'
+    $skipDocker = Test-SkipFlag -Switch $SkipDocker -EnvVarName 'LIMPEZA_SKIP_DOCKER'
+
+    $nodeTargets = @(
+        @{ Label = 'npm';        Path = Join-Path $env:LOCALAPPDATA 'npm-cache' }
+        @{ Label = 'npm legado'; Path = Join-Path $env:APPDATA 'npm-cache' }
+        @{ Label = 'pnpm';       Path = Join-Path $env:LOCALAPPDATA 'pnpm-store' }
+        @{ Label = 'Yarn';       Path = Join-Path $env:LOCALAPPDATA 'Yarn\Cache' }
+        @{ Label = 'Yarn Berry'; Path = Join-Path $env:LOCALAPPDATA 'Yarn\Berry\cache' }
+        @{ Label = 'Turborepo';  Path = Join-Path $env:LOCALAPPDATA 'turbo' }
+    )
+
+    $pythonTargets = @(
+        @{ Label = 'pip';     Path = Join-Path $env:LOCALAPPDATA 'pip\Cache' }
+        @{ Label = 'pip alt'; Path = Join-Path $env:USERPROFILE '.cache\pip' }
+        @{ Label = 'Poetry';  Path = Join-Path $env:LOCALAPPDATA 'pypoetry\Cache' }
+        @{ Label = 'uv';      Path = Join-Path $env:LOCALAPPDATA 'uv\cache' }
+    )
+
+    if ($skipNode) {
+        Add-CleanupLogEntry -Category 'Node' -Target '(todos)' -Status 'Pulado' -Detail 'SkipNode ou LIMPEZA_SKIP_NODE'
+    }
+    else {
+        foreach ($target in $nodeTargets) {
+            Invoke-CleanupFolderPath -Category 'Node' -TargetPath $target.Path
+        }
+    }
+
+    if ($skipPython) {
+        Add-CleanupLogEntry -Category 'Python' -Target '(todos)' -Status 'Pulado' -Detail 'SkipPython ou LIMPEZA_SKIP_PYTHON'
+    }
+    else {
+        foreach ($target in $pythonTargets) {
+            Invoke-CleanupFolderPath -Category 'Python' -TargetPath $target.Path
+        }
+    }
+
+    if ($skipDocker) {
+        Add-CleanupLogEntry -Category 'Docker' -Target 'docker system prune -f' -Status 'Pulado' -Detail 'SkipDocker ou LIMPEZA_SKIP_DOCKER'
+        return
+    }
+
+    $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $dockerCmd) {
+        Add-CleanupLogEntry -Category 'Docker' -Target 'docker system prune -f' -Status 'Ignorado' -Detail 'Docker CLI nao encontrado'
+        return
+    }
+
+    $dockerOut = & docker system prune -f 2>&1 | Out-String
+    $dockerOut = ($dockerOut -replace '\s+', ' ').Trim()
+    if ($dockerOut.Length -gt 120) {
+        $dockerOut = $dockerOut.Substring(0, 117) + '...'
+    }
+
+    if ($LASTEXITCODE -eq 0) {
+        $detail = if ($dockerOut) { $dockerOut } else { 'Prune concluido' }
+        Add-CleanupLogEntry -Category 'Docker' -Target 'docker system prune -f' -Status 'Limpo' -Detail $detail
+    }
+    else {
+        $detail = if ($dockerOut) { $dockerOut } else { "Codigo de saida $LASTEXITCODE" }
+        Add-CleanupLogEntry -Category 'Docker' -Target 'docker system prune -f' -Status 'Erro' -Detail $detail
+    }
+}
+
 function Get-DriveCFreeBytes {
     (Get-PSDrive C).Free
 }
@@ -547,7 +785,7 @@ function Show-FinalResult {
     }
     else {
         Write-Host ("  $(E 0x1F4CA) Espaco ganho com a limpeza: {0} GB" -f (($gained / 1GB).ToString('N2', $culture))) -ForegroundColor DarkGray
-        Write-Host "  $(E 0x1F4A1) (nenhum ganho mensuravel — arquivos em uso ou disco ja limpo)" -ForegroundColor DarkGray
+        Write-Host "  $(E 0x1F4A1) (nenhum ganho mensuravel - arquivos em uso ou disco ja limpo)" -ForegroundColor DarkGray
     }
 
     Write-Host ''
@@ -929,63 +1167,97 @@ if (-not (Test-Path $emptyFolder)) {
     New-Item -ItemType Directory -Path $emptyFolder -Force | Out-Null
 }
 
-# [1/6] TEMP do Windows
-Write-StepHeader -Number 1 -Total 6 -Icon 0x1F5D1 -Title 'TEMP do Windows'
+$stepTotal = 7
+
+# [1/7] TEMP do Windows
+$winTempPath = Join-Path $env:windir 'Temp'
+Write-StepHeader -Number 1 -Total $stepTotal -Icon 0x1F5D1 -Title 'TEMP do Windows'
 Show-Spinner 'Varrendo arquivos temporarios'
-$code = Invoke-RobocopyClean -TargetPath "$env:windir\Temp"
+$code = Invoke-RobocopyClean -TargetPath $winTempPath
 Write-StepResult -ExitCode $code
+Add-CleanupLogEntry -Category 'Windows' -Target $winTempPath -Status (Get-RobocopyLogStatus -ExitCode $code) -Detail $(if ($code -ge 8) { 'Alguns arquivos em uso' } else { 'Concluido' })
 
-# [2/6] TEMP do usuario
-Write-StepHeader -Number 2 -Total 6 -Icon 0x1F4C1 -Title 'TEMP do usuario'
+# [2/7] TEMP do usuario
+$userTempPath = $env:TEMP
+Write-StepHeader -Number 2 -Total $stepTotal -Icon 0x1F4C1 -Title 'TEMP do usuario'
 Show-Spinner 'Limpando pasta TEMP do usuario'
-$code = Invoke-RobocopyClean -TargetPath $env:TEMP
+$code = Invoke-RobocopyClean -TargetPath $userTempPath
 Write-StepResult -ExitCode $code
+Add-CleanupLogEntry -Category 'Windows' -Target $userTempPath -Status (Get-RobocopyLogStatus -ExitCode $code) -Detail $(if ($code -ge 8) { 'Alguns arquivos em uso' } else { 'Concluido' })
 
-# [3/6] Prefetch
-Write-StepHeader -Number 3 -Total 6 -Icon 0x26A1 -Title 'Prefetch'
+# [3/7] Prefetch
+$prefetchPath = Join-Path $env:windir 'Prefetch'
+Write-StepHeader -Number 3 -Total $stepTotal -Icon 0x26A1 -Title 'Prefetch'
 Show-Spinner 'Otimizando cache Prefetch'
-$code = Invoke-RobocopyClean -TargetPath "$env:windir\Prefetch"
+$code = Invoke-RobocopyClean -TargetPath $prefetchPath
 Write-StepResult -ExitCode $code
+Add-CleanupLogEntry -Category 'Windows' -Target $prefetchPath -Status (Get-RobocopyLogStatus -ExitCode $code) -Detail $(if ($code -ge 8) { 'Alguns arquivos em uso' } else { 'Concluido' })
 
-# [4/6] Windows Installer
-Write-StepHeader -Number 4 -Total 6 -Icon 0x1F4E6 -Title 'Windows Installer (agressivo)'
-Show-Spinner 'Removendo residuos do Installer'
+# [4/7] Caches de desenvolvimento
+if (-not (Test-SkipFlag -Switch $SkipDevCaches -EnvVarName 'LIMPEZA_SKIP_DEV')) {
+    Write-StepHeader -Number 4 -Total $stepTotal -Icon 0x1F4BB -Title 'Caches de desenvolvimento (Node, Python, Docker)'
+    Show-Spinner 'Limpando caches npm, pip, Docker...'
+    Invoke-DevToolCacheClean
+    Write-StepResult -ExitCode 0
+}
+else {
+    Add-CleanupLogEntry -Category 'Dev' -Target '(todos)' -Status 'Pulado' -Detail 'SkipDevCaches ou LIMPEZA_SKIP_DEV'
+}
+
+# [5/7] Windows Installer
 $installer = Join-Path $env:windir 'Installer'
+Write-StepHeader -Number 5 -Total $stepTotal -Icon 0x1F4E6 -Title 'Windows Installer (agressivo)'
+Show-Spinner 'Removendo residuos do Installer'
 & takeown /f $installer /r /d y 2>$null | Out-Null
 & icacls $installer /grant administrators:F /t 2>$null | Out-Null
 & attrib -h -r -s "$installer\*.*" /s /d 2>$null | Out-Null
 Get-ChildItem -Path $installer -Recurse -Force -ErrorAction SilentlyContinue |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Write-StepResult -ExitCode 0
+Add-CleanupLogEntry -Category 'Windows' -Target $installer -Status 'Limpo' -Detail 'Residuos do Installer removidos'
 
-# [5/6] DISM
-Write-StepHeader -Number 5 -Total 6 -Icon 0x1F527 -Title 'Componentes do Windows (DISM)'
+# [6/7] DISM
+$dismTarget = 'DISM - Repositorio de Componentes'
+Write-StepHeader -Number 6 -Total $stepTotal -Icon 0x1F527 -Title 'Componentes do Windows (DISM)'
 Show-Spinner 'Analisando repositorio de componentes'
 $dismOut = & Dism.exe /Online /Cleanup-Image /AnalyzeComponentStore 2>&1 | Out-String
 if ($dismOut -match 'Limpeza do Repositorio de Componentes Recomendada\s*:\s*Sim') {
     Write-Host "       $(E 0x1F525) Limpeza recomendada. Executando..." -ForegroundColor Yellow
     & Dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase
+    $dismStatus = if ($LASTEXITCODE -eq 0) { 'Limpo' } else { 'Erro' }
+    $dismDetail = if ($LASTEXITCODE -eq 0) { 'Limpeza de componentes executada' } else { "Codigo de saida $LASTEXITCODE" }
 }
 else {
     Write-Host "       $(E 0x2728) Nenhuma limpeza necessaria no momento." -ForegroundColor DarkGray
+    $dismStatus = 'Ignorado'
+    $dismDetail = 'Nenhuma limpeza necessaria no momento'
 }
 Write-StepResult -ExitCode $LASTEXITCODE
+Add-CleanupLogEntry -Category 'Windows' -Target $dismTarget -Status $dismStatus -Detail $dismDetail
 
-# [6/6] cleanmgr
+# [7/7] cleanmgr
 if (-not $ScheduledRun) {
-    Write-StepHeader -Number 6 -Total 6 -Icon 0x1F4BF -Title 'Limpeza de Disco (cleanmgr)'
+    Write-StepHeader -Number 7 -Total $stepTotal -Icon 0x1F4BF -Title 'Limpeza de Disco (cleanmgr)'
     Write-Host "       $(E 0x1FA9F) Abrindo o assistente..."
     Write-Host ''
     & cleanmgr /sagerun:1
-    Write-StepResult -ExitCode $LASTEXITCODE
+    $cleanmgrCode = $LASTEXITCODE
+    Write-StepResult -ExitCode $cleanmgrCode
+    $cleanmgrStatus = if ($cleanmgrCode -ge 8) { 'Parcial' } elseif ($cleanmgrCode -eq 0) { 'Limpo' } else { 'Erro' }
+    Add-CleanupLogEntry -Category 'Windows' -Target 'cleanmgr /sagerun:1' -Status $cleanmgrStatus -Detail 'Assistente de limpeza de disco'
+}
+else {
+    Add-CleanupLogEntry -Category 'Windows' -Target 'cleanmgr /sagerun:1' -Status 'Pulado' -Detail 'Execucao agendada (sem assistente grafico)'
 }
 
 $freeAfter = Get-DriveCFreeBytes
 $endTime   = Get-Date
 
 if (-not $ScheduledRun) {
-    Show-FinalResult -FreeBefore $freeBefore -FreeAfter $freeAfter -StartTime $startTime -EndTime $endTime
-    Invoke-ScheduledMaintenancePrompt
+    Invoke-FinalSummaryScreen -FreeBefore $freeBefore -FreeAfter $freeAfter -StartTime $startTime -EndTime $endTime
+}
+else {
+    Export-CleanupLogToFile -FreeBefore $freeBefore -FreeAfter $freeAfter -StartTime $startTime -EndTime $endTime
 }
 
 if (Test-Path $emptyFolder) {
