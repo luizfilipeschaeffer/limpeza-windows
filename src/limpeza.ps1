@@ -8,10 +8,10 @@ param(
     [switch]$SkipDocker
 )
 
-# Limpeza Avancada do Windows v2.1.0
+# Limpeza Avancada do Windows v2.2.0
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.1.0'
+$AppVersion = '2.2.0'
 $script:CleanupLog = [System.Collections.Generic.List[object]]::new()
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
@@ -622,7 +622,7 @@ function Export-CleanupLogToFile {
     )
 
     $culture = [cultureinfo]::GetCultureInfo('pt-BR')
-    $gained  = [math]::Max(0, $FreeAfter - $FreeBefore)
+    $gainedGb = Get-DiskSpaceGainedGb -FreeBefore $FreeBefore -FreeAfter $FreeAfter
     $logPath = Get-CleanupLogFilePath
     $lines   = [System.Collections.Generic.List[string]]::new()
 
@@ -640,9 +640,9 @@ function Export-CleanupLogToFile {
 
     $lines.Add('')
     $lines.Add('--- Espaco em disco C: ---')
-    $lines.Add(("Antes:  {0} GB" -f (($FreeBefore / 1GB).ToString('N2', $culture))))
-    $lines.Add(("Depois: {0} GB" -f (($FreeAfter / 1GB).ToString('N2', $culture))))
-    $lines.Add(("Ganho:  {0} GB" -f (($gained / 1GB).ToString('N2', $culture))))
+    $lines.Add(("Antes:  {0} GB" -f (Get-DiskSpaceGbDisplay -FreeBytes $FreeBefore)))
+    $lines.Add(("Depois: {0} GB" -f (Get-DiskSpaceGbDisplay -FreeBytes $FreeAfter)))
+    $lines.Add(("Ganho:  {0} GB" -f $gainedGb.ToString('N2', $culture)))
 
     $lines | Set-Content -Path $logPath -Encoding UTF8
 }
@@ -664,12 +664,14 @@ function Invoke-FinalSummaryScreen {
     Write-Host ("           $(E 0x1F389)  LIMPEZA CONCLUIDA  $(E 0x1F389)") -ForegroundColor Green
     Write-Host '  ======================================================' -ForegroundColor Cyan
     Write-Host ''
+    Write-Host "       $(E 0x1F464) Autor   : Luiz Filipe Schaeffer"
     Write-Host "       $(E 0x1F4CC) Versao  : $AppVersion"
+    Write-Host ("       $(E 0x1F550) Inicio  : {0}" -f $StartTime.ToString('dd/MM/yyyy HH:mm:ss'))
     Write-Host ("       $(E 0x1F3C1) Termino : {0}" -f $EndTime.ToString('dd/MM/yyyy HH:mm:ss'))
     Write-Host ''
 
     Show-CleanupReport
-    Show-FinalResult -FreeBefore $FreeBefore -FreeAfter $FreeAfter -StartTime $StartTime -EndTime $EndTime
+    Show-FinalResult -FreeBefore $FreeBefore -FreeAfter $FreeAfter
     Invoke-ScheduledMaintenancePrompt
 }
 
@@ -756,47 +758,124 @@ function Invoke-DevToolCacheClean {
     }
 }
 
+function Invoke-WindowsUpdateCacheClean {
+    $downloadPath = Join-Path $env:windir 'SoftwareDistribution\Download'
+
+    Stop-Service wuauserv -Force -ErrorAction SilentlyContinue
+    Stop-Service bits -Force -ErrorAction SilentlyContinue
+
+    Invoke-CleanupFolderPath -Category 'Windows' -TargetPath $downloadPath
+
+    Start-Service wuauserv -ErrorAction SilentlyContinue
+    Start-Service bits -ErrorAction SilentlyContinue
+}
+
+function Invoke-SystemSafeCacheClean {
+    $folderTargets = @(
+        Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Explorer'
+        Join-Path $env:windir 'Logs'
+        Join-Path $env:ProgramData 'Microsoft\Windows\WER'
+    )
+
+    foreach ($targetPath in $folderTargets) {
+        Invoke-CleanupFolderPath -Category 'Windows' -TargetPath $targetPath
+    }
+}
+
+function Invoke-BrowserCacheClean {
+    $browserTargets = @(
+        Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\User Data\Default\Cache'
+        Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default\Cache'
+    )
+
+    foreach ($targetPath in $browserTargets) {
+        Invoke-CleanupFolderPath -Category 'Navegador' -TargetPath $targetPath
+    }
+
+    $firefoxProfilesRoot = Join-Path $env:LOCALAPPDATA 'Mozilla\Firefox\Profiles'
+    if (-not (Test-Path -LiteralPath $firefoxProfilesRoot)) {
+        Add-CleanupLogEntry -Category 'Navegador' -Target $firefoxProfilesRoot -Status 'Ignorado' -Detail 'Firefox nao instalado'
+        return
+    }
+
+    $profiles = @(Get-ChildItem -LiteralPath $firefoxProfilesRoot -Directory -ErrorAction SilentlyContinue)
+    if ($profiles.Count -eq 0) {
+        Add-CleanupLogEntry -Category 'Navegador' -Target $firefoxProfilesRoot -Status 'Ignorado' -Detail 'Nenhum perfil encontrado'
+        return
+    }
+
+    foreach ($profile in $profiles) {
+        Invoke-CleanupFolderPath -Category 'Navegador' -TargetPath (Join-Path $profile.FullName 'cache2')
+    }
+}
+
+function Invoke-RecycleBinClean {
+    try {
+        Clear-RecycleBin -Force -ErrorAction Stop
+        Add-CleanupLogEntry -Category 'Windows' -Target 'Lixeira' -Status 'Limpo' -Detail 'Lixeira esvaziada'
+    }
+    catch {
+        Add-CleanupLogEntry -Category 'Windows' -Target 'Lixeira' -Status 'Parcial' -Detail 'Nao foi possivel esvaziar completamente'
+    }
+}
+
+function Invoke-DnsCacheFlush {
+    $null = & ipconfig.exe /flushdns 2>&1
+    $status = if ($LASTEXITCODE -eq 0) { 'Limpo' } else { 'Erro' }
+    $detail = if ($LASTEXITCODE -eq 0) { 'Cache DNS limpo' } else { "Codigo de saida $LASTEXITCODE" }
+    Add-CleanupLogEntry -Category 'Windows' -Target 'ipconfig /flushdns' -Status $status -Detail $detail
+}
+
 function Get-DriveCFreeBytes {
     (Get-PSDrive C).Free
+}
+
+function Get-DiskSpaceGbDisplay {
+    param([long]$FreeBytes)
+
+    $culture = [cultureinfo]::GetCultureInfo('pt-BR')
+    [decimal]::Round($FreeBytes / 1GB, 2, [MidpointRounding]::AwayFromZero).ToString('N2', $culture)
+}
+
+function Get-DiskSpaceGainedGb {
+    param(
+        [long]$FreeBefore,
+        [long]$FreeAfter
+    )
+
+    $culture  = [cultureinfo]::GetCultureInfo('pt-BR')
+    $antesGb  = [decimal]::Parse((Get-DiskSpaceGbDisplay -FreeBytes $FreeBefore), $culture)
+    $depoisGb = [decimal]::Parse((Get-DiskSpaceGbDisplay -FreeBytes $FreeAfter), $culture)
+    $depoisGb - $antesGb
 }
 
 function Show-FinalResult {
     param(
         [long]$FreeBefore,
-        [long]$FreeAfter,
-        [datetime]$StartTime,
-        [datetime]$EndTime
+        [long]$FreeAfter
     )
 
-    $culture = [cultureinfo]::GetCultureInfo('pt-BR')
-    $gained  = [math]::Max(0, $FreeAfter - $FreeBefore)
+    $culture  = [cultureinfo]::GetCultureInfo('pt-BR')
+    $antesGb  = Get-DiskSpaceGbDisplay -FreeBytes $FreeBefore
+    $depoisGb = Get-DiskSpaceGbDisplay -FreeBytes $FreeAfter
+    $gainedGb = Get-DiskSpaceGainedGb -FreeBefore $FreeBefore -FreeAfter $FreeAfter
 
     Write-Host ''
     Write-Host '  ======================================================' -ForegroundColor Cyan
     Write-Host ("           $(E 0x1F389)  RESULTADO FINAL  $(E 0x1F389)") -ForegroundColor Green
     Write-Host '  ======================================================' -ForegroundColor Cyan
     Write-Host ''
-    Write-Host ("  $(E 0x1F4C9) Antes  : {0} GB livres" -f (($FreeBefore / 1GB).ToString('N2', $culture))) -ForegroundColor DarkYellow
-    Write-Host ("  $(E 0x1F4C8) Depois : {0} GB livres" -f (($FreeAfter / 1GB).ToString('N2', $culture))) -ForegroundColor Green
+    Write-Host ("  $(E 0x1F4C9) Antes  : {0} GB livres" -f $antesGb) -ForegroundColor DarkYellow
+    Write-Host ("  $(E 0x1F4C8) Depois : {0} GB livres" -f $depoisGb) -ForegroundColor Green
     Write-Host ''
 
-    if ($gained -gt 0) {
-        Write-Host ("  $(E 0x1F680) Espaco livre com a limpeza: +{0} GB" -f (($gained / 1GB).ToString('N2', $culture))) -ForegroundColor Green
-    }
-    else {
-        Write-Host ("  $(E 0x1F4CA) Espaco ganho com a limpeza: {0} GB" -f (($gained / 1GB).ToString('N2', $culture))) -ForegroundColor DarkGray
+    $gainedColor = if ($gainedGb -gt 0) { 'Green' } else { 'DarkGray' }
+    Write-Host ("  $(E 0x1F4CA) Espaco ganho com a limpeza: {0} GB" -f $gainedGb.ToString('N2', $culture)) -ForegroundColor $gainedColor
+    if ($gainedGb -le 0) {
         Write-Host "  $(E 0x1F4A1) (nenhum ganho mensuravel - arquivos em uso ou disco ja limpo)" -ForegroundColor DarkGray
     }
 
     Write-Host ''
-    Write-Host '  ======================================================' -ForegroundColor Cyan
-    Write-Host ''
-    Write-Host "       $(E 0x1F464) Autor   : Luiz Filipe Schaeffer"
-    Write-Host "       $(E 0x1F4CC) Versao  : $AppVersion"
-    Write-Host ("       $(E 0x1F550) Inicio  : {0}" -f $StartTime.ToString('dd/MM/yyyy HH:mm:ss'))
-    Write-Host ("       $(E 0x1F3C1) Termino : {0}" -f $EndTime.ToString('dd/MM/yyyy HH:mm:ss'))
-    Write-Host ''
-    Write-Host '  ======================================================' -ForegroundColor Cyan
 }
 
 function Read-YesNoChoice {
@@ -866,9 +945,9 @@ function Get-ScheduleFrequencyLabel {
 
 function Show-SchedulePromptBanner {
     Write-Host ''
-    Write-Host '  ======================================================' -ForegroundColor Cyan
-    Write-Host ("   $(E 0x23F0)  AGENDAMENTO AUTOMATICO") -ForegroundColor Cyan
-    Write-Host '  ======================================================' -ForegroundColor Cyan
+    Write-Host '======================================================' -ForegroundColor Cyan
+    Write-Host ("           $(E 0x23F0)  AGENDAMENTO AUTOMATICO") -ForegroundColor Cyan
+    Write-Host '======================================================' -ForegroundColor Cyan
     Write-Host ''
 }
 
@@ -1167,9 +1246,9 @@ if (-not (Test-Path $emptyFolder)) {
     New-Item -ItemType Directory -Path $emptyFolder -Force | Out-Null
 }
 
-$stepTotal = 7
+$stepTotal = 11
 
-# [1/7] TEMP do Windows
+# [1/11] TEMP do Windows
 $winTempPath = Join-Path $env:windir 'Temp'
 Write-StepHeader -Number 1 -Total $stepTotal -Icon 0x1F5D1 -Title 'TEMP do Windows'
 Show-Spinner 'Varrendo arquivos temporarios'
@@ -1177,7 +1256,7 @@ $code = Invoke-RobocopyClean -TargetPath $winTempPath
 Write-StepResult -ExitCode $code
 Add-CleanupLogEntry -Category 'Windows' -Target $winTempPath -Status (Get-RobocopyLogStatus -ExitCode $code) -Detail $(if ($code -ge 8) { 'Alguns arquivos em uso' } else { 'Concluido' })
 
-# [2/7] TEMP do usuario
+# [2/11] TEMP do usuario
 $userTempPath = $env:TEMP
 Write-StepHeader -Number 2 -Total $stepTotal -Icon 0x1F4C1 -Title 'TEMP do usuario'
 Show-Spinner 'Limpando pasta TEMP do usuario'
@@ -1185,7 +1264,7 @@ $code = Invoke-RobocopyClean -TargetPath $userTempPath
 Write-StepResult -ExitCode $code
 Add-CleanupLogEntry -Category 'Windows' -Target $userTempPath -Status (Get-RobocopyLogStatus -ExitCode $code) -Detail $(if ($code -ge 8) { 'Alguns arquivos em uso' } else { 'Concluido' })
 
-# [3/7] Prefetch
+# [3/11] Prefetch
 $prefetchPath = Join-Path $env:windir 'Prefetch'
 Write-StepHeader -Number 3 -Total $stepTotal -Icon 0x26A1 -Title 'Prefetch'
 Show-Spinner 'Otimizando cache Prefetch'
@@ -1193,9 +1272,34 @@ $code = Invoke-RobocopyClean -TargetPath $prefetchPath
 Write-StepResult -ExitCode $code
 Add-CleanupLogEntry -Category 'Windows' -Target $prefetchPath -Status (Get-RobocopyLogStatus -ExitCode $code) -Detail $(if ($code -ge 8) { 'Alguns arquivos em uso' } else { 'Concluido' })
 
-# [4/7] Caches de desenvolvimento
+# [4/11] Cache do Windows Update
+Write-StepHeader -Number 4 -Total $stepTotal -Icon 0x1F504 -Title 'Cache do Windows Update'
+Show-Spinner 'Limpando downloads do Windows Update'
+Invoke-WindowsUpdateCacheClean
+Write-StepResult -ExitCode 0
+
+# [5/11] Caches do sistema (miniaturas, logs, relatorios de erro)
+Write-StepHeader -Number 5 -Total $stepTotal -Icon 0x1F4C3 -Title 'Caches do sistema (miniaturas, logs, WER)'
+Show-Spinner 'Limpando miniaturas, logs e relatorios de erro'
+Invoke-SystemSafeCacheClean
+Write-StepResult -ExitCode 0
+
+# [6/11] Caches de navegadores
+Write-StepHeader -Number 6 -Total $stepTotal -Icon 0x1F310 -Title 'Caches de navegadores (Edge, Chrome, Firefox)'
+Show-Spinner 'Limpando caches Edge, Chrome e Firefox'
+Invoke-BrowserCacheClean
+Write-StepResult -ExitCode 0
+
+# [7/11] Lixeira e cache DNS
+Write-StepHeader -Number 7 -Total $stepTotal -Icon 0x1F5D1 -Title 'Lixeira e cache DNS'
+Show-Spinner 'Esvaziando lixeira e limpando cache DNS'
+Invoke-RecycleBinClean
+Invoke-DnsCacheFlush
+Write-StepResult -ExitCode 0
+
+# [8/11] Caches de desenvolvimento
 if (-not (Test-SkipFlag -Switch $SkipDevCaches -EnvVarName 'LIMPEZA_SKIP_DEV')) {
-    Write-StepHeader -Number 4 -Total $stepTotal -Icon 0x1F4BB -Title 'Caches de desenvolvimento (Node, Python, Docker)'
+    Write-StepHeader -Number 8 -Total $stepTotal -Icon 0x1F4BB -Title 'Caches de desenvolvimento (Node, Python, Docker)'
     Show-Spinner 'Limpando caches npm, pip, Docker...'
     Invoke-DevToolCacheClean
     Write-StepResult -ExitCode 0
@@ -1204,9 +1308,9 @@ else {
     Add-CleanupLogEntry -Category 'Dev' -Target '(todos)' -Status 'Pulado' -Detail 'SkipDevCaches ou LIMPEZA_SKIP_DEV'
 }
 
-# [5/7] Windows Installer
+# [9/11] Windows Installer
 $installer = Join-Path $env:windir 'Installer'
-Write-StepHeader -Number 5 -Total $stepTotal -Icon 0x1F4E6 -Title 'Windows Installer (agressivo)'
+Write-StepHeader -Number 9 -Total $stepTotal -Icon 0x1F4E6 -Title 'Windows Installer (agressivo)'
 Show-Spinner 'Removendo residuos do Installer'
 & takeown /f $installer /r /d y 2>$null | Out-Null
 & icacls $installer /grant administrators:F /t 2>$null | Out-Null
@@ -1216,9 +1320,9 @@ Get-ChildItem -Path $installer -Recurse -Force -ErrorAction SilentlyContinue |
 Write-StepResult -ExitCode 0
 Add-CleanupLogEntry -Category 'Windows' -Target $installer -Status 'Limpo' -Detail 'Residuos do Installer removidos'
 
-# [6/7] DISM
+# [10/11] DISM
 $dismTarget = 'DISM - Repositorio de Componentes'
-Write-StepHeader -Number 6 -Total $stepTotal -Icon 0x1F527 -Title 'Componentes do Windows (DISM)'
+Write-StepHeader -Number 10 -Total $stepTotal -Icon 0x1F527 -Title 'Componentes do Windows (DISM)'
 Show-Spinner 'Analisando repositorio de componentes'
 $dismOut = & Dism.exe /Online /Cleanup-Image /AnalyzeComponentStore 2>&1 | Out-String
 if ($dismOut -match 'Limpeza do Repositorio de Componentes Recomendada\s*:\s*Sim') {
@@ -1235,9 +1339,9 @@ else {
 Write-StepResult -ExitCode $LASTEXITCODE
 Add-CleanupLogEntry -Category 'Windows' -Target $dismTarget -Status $dismStatus -Detail $dismDetail
 
-# [7/7] cleanmgr
+# [11/11] cleanmgr
 if (-not $ScheduledRun) {
-    Write-StepHeader -Number 7 -Total $stepTotal -Icon 0x1F4BF -Title 'Limpeza de Disco (cleanmgr)'
+    Write-StepHeader -Number 11 -Total $stepTotal -Icon 0x1F4BF -Title 'Limpeza de Disco (cleanmgr)'
     Write-Host "       $(E 0x1FA9F) Abrindo o assistente..."
     Write-Host ''
     & cleanmgr /sagerun:1

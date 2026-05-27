@@ -47,8 +47,13 @@ Repositorio: https://github.com/$Repo
 "@ | Set-Content -Path $notesPath -Encoding UTF8
 }
 
-$existing = gh release view $tag --repo $Repo 2>$null
-if ($LASTEXITCODE -eq 0) {
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+gh release view $tag --repo $Repo 2>$null | Out-Null
+$releaseExists = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $prevEap
+
+if ($releaseExists) {
     Write-Host "Release $tag ja existe. Enviando asset atualizado..." -ForegroundColor Yellow
     gh release upload $tag $exePath --repo $Repo --clobber
     Write-Host "Asset atualizado na release $tag." -ForegroundColor Green
