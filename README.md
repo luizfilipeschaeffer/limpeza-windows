@@ -15,6 +15,8 @@ Ferramenta de manutenção e liberação de espaço no disco C: (TEMP, Prefetch,
 
 Requer **Administrador** (UAC).
 
+Ao iniciar, o app verifica atualizações no GitHub. Se houver versão mais nova, pergunta se deseja baixar e reiniciar; caso contrário, segue com a limpeza. Para pular a verificação: `$env:LIMPEZA_SKIP_UPDATE = '1'`.
+
 ## Baixar a última versão
 
 1. Abra [Releases](https://github.com/luizfilipeschaeffer/limpeza-windows/releases/latest).

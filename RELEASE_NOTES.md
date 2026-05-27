@@ -1,20 +1,21 @@
-## Limpeza Avancada do Windows v2.0.0
+## Limpeza Avancada do Windows v2.0.1
 
-Primeira release publica com executavel pronto para uso.
+### Novidades
+
+- Verificacao de atualizacoes no GitHub **antes** da limpeza iniciar
+- Pergunta interativa: atualizar agora (S) ou continuar com a versao atual (N)
+- Download automatico do executavel e reinicio na nova versao ao escolher atualizar
 
 ### Incluido
 
 - `LimpezaWindows.exe` — aplicativo com icone personalizado e elevacao UAC
-- Limpeza de TEMP (Windows e usuario), Prefetch, Windows Installer
-- Analise DISM e assistente cleanmgr
+- Limpeza de TEMP (Windows e usuario), Prefetch, Windows Installer, DISM e cleanmgr
 
 ### Como usar
 
 1. Baixe **LimpezaWindows.exe** abaixo
-2. Coloque na mesma pasta que `limpeza.bat` (opcional) ou execute direto como Administrador
+2. Execute `limpeza.bat` ou o executavel como Administrador
 
-### Atualizacoes futuras
+### Atualizacoes
 
-Novas versoes aparecem em: https://github.com/luizfilipeschaeffer/limpeza-windows/releases
-
-Para atualizar a partir do codigo-fonte: execute `atualizar.bat` ou `scripts\get-latest-release.ps1`.
+https://github.com/luizfilipeschaeffer/limpeza-windows/releases

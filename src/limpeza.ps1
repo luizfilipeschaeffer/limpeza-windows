@@ -1,8 +1,8 @@
 #Requires -RunAsAdministrator
-# Limpeza Avancada do Windows v2.0.0
+# Limpeza Avancada do Windows v2.0.1
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.0'
+$AppVersion = '2.0.1'
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -14,7 +14,7 @@ function Initialize-Console {
     [Console]::OutputEncoding = $utf8
     [Console]::InputEncoding  = $utf8
     $global:OutputEncoding    = $utf8
-    $Host.UI.RawUI.WindowTitle = "$(E 0x1F9F9) Limpeza Avancada do Windows v2.0"
+    $Host.UI.RawUI.WindowTitle = "$(E 0x1F9F9) Limpeza Avancada do Windows v$AppVersion"
     Clear-Host
 }
 
@@ -22,26 +22,190 @@ function E([int]$CodePoint) {
     [char]::ConvertFromUtf32($CodePoint)
 }
 
-function Show-GitHubUpdateNotice {
-    param([string]$CurrentVersion = $AppVersion)
+$script:GitHubApiHeaders = @{
+    'User-Agent' = 'LimpezaWindows'
+    'Accept'     = 'application/vnd.github+json'
+}
+$script:UpdateAssetName = 'LimpezaWindows.exe'
+
+function Get-AppInstallInfo {
+    $runningExe = $PSCommandPath -match '\.exe$'
+    if ($runningExe) {
+        $exePath = $PSCommandPath
+        $version = $AppVersion
+        if (Test-Path $exePath) {
+            $fileVersion = (Get-Item -LiteralPath $exePath).VersionInfo.ProductVersion
+            if ($fileVersion) {
+                $parts = $fileVersion.Split('.')
+                $version = if ($parts.Count -ge 3) {
+                    "$($parts[0]).$($parts[1]).$($parts[2])"
+                } else {
+                    $fileVersion
+                }
+            }
+        }
+        return [PSCustomObject]@{
+            Mode             = 'exe'
+            ExecutablePath   = $exePath
+            InstallDirectory = Split-Path $exePath -Parent
+            CurrentVersion   = $version
+        }
+    }
+
+    $projectRoot = Split-Path $PSScriptRoot -Parent
+    $exePath = Join-Path $projectRoot "dist\$script:UpdateAssetName"
+    return [PSCustomObject]@{
+        Mode             = 'script'
+        ExecutablePath   = $exePath
+        InstallDirectory = $projectRoot
+        CurrentVersion   = $AppVersion
+    }
+}
+
+function Get-GitHubLatestRelease {
+    $uri = "https://api.github.com/repos/$GitHubRepo/releases/latest"
+    $release = Invoke-RestMethod -Uri $uri -Headers $script:GitHubApiHeaders -TimeoutSec 12 -UseBasicParsing
+    $version = ($release.tag_name -replace '^v', '').Trim()
+    $asset = $release.assets | Where-Object { $_.name -eq $script:UpdateAssetName } | Select-Object -First 1
+    if (-not $asset) {
+        throw "Arquivo '$($script:UpdateAssetName)' nao encontrado na release $($release.tag_name)."
+    }
+    [PSCustomObject]@{
+        Version      = $version
+        Tag          = $release.tag_name
+        DownloadUrl  = $asset.browser_download_url
+        ReleaseUrl   = $release.html_url
+        PublishedAt  = $release.published_at
+    }
+}
+
+function Read-UpdateChoice {
+    while ($true) {
+        Write-Host ''
+        Write-Host "   $(E 0x2753)  [S] Sim — baixar e reiniciar com a nova versao" -ForegroundColor White
+        Write-Host "   $(E 0x23ED)  [N] Nao — continuar a limpeza agora" -ForegroundColor White
+        Write-Host ''
+        Write-Host -NoNewline '   Digite S ou N e pressione Enter: ' -ForegroundColor Yellow
+
+        $answer = (Read-Host).Trim().ToUpperInvariant()
+        if ($answer -in @('S', 'SIM', 'Y', 'YES')) { return $true }
+        if ($answer -in @('N', 'NAO', 'NÃO', 'NO')) { return $false }
+        Write-Host '   Opcao invalida. Use S para atualizar ou N para continuar.' -ForegroundColor Red
+    }
+}
+
+function Start-AppUpdateAndRestart {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Release,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Install
+    )
+
+    $targetExe = $Install.ExecutablePath
+    $targetDir = $Install.InstallDirectory
+    New-Item -ItemType Directory -Path (Split-Path $targetExe -Parent) -Force | Out-Null
+
+    $stagingExe = Join-Path $env:TEMP "LimpezaWindows-$([guid]::NewGuid().ToString('N')).exe"
+    Write-Host ''
+    Write-Host "   $(E 0x1F4E5) Baixando $($script:UpdateAssetName) v$($Release.Version)..." -ForegroundColor Cyan
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = 'Continue'
+    try {
+        Invoke-WebRequest -Uri $Release.DownloadUrl -OutFile $stagingExe -UseBasicParsing
+    }
+    finally {
+        $ProgressPreference = $prevProgress
+    }
+
+    if (-not (Test-Path $stagingExe)) {
+        throw 'Download da atualizacao falhou.'
+    }
+
+    $pidAtStart = $PID
+    $helperPs1 = Join-Path $env:TEMP "limpeza-updater-$([guid]::NewGuid().ToString('N')).ps1"
+    $helperContent = @"
+`$ErrorActionPreference = 'Stop'
+`$staging = '$($stagingExe.Replace("'", "''"))'
+`$target = '$($targetExe.Replace("'", "''"))'
+`$workDir = '$($targetDir.Replace("'", "''"))'
+`$parentPid = $pidAtStart
+
+try {
+    Wait-Process -Id `$parentPid -ErrorAction SilentlyContinue
+} catch {}
+Start-Sleep -Seconds 2
+
+if (Test-Path `$target) {
+    Remove-Item -LiteralPath `$target -Force -ErrorAction SilentlyContinue
+    `$retries = 0
+    while ((Test-Path `$target) -and (`$retries -lt 15)) {
+        Start-Sleep -Milliseconds 400
+        `$retries++
+    }
+}
+Move-Item -LiteralPath `$staging -Destination `$target -Force
+Start-Process -FilePath `$target -WorkingDirectory `$workDir
+"@
+    Set-Content -Path $helperPs1 -Value $helperContent -Encoding UTF8
+
+    Write-Host "   $(E 0x2705) Download concluido. Reiniciando com v$($Release.Version)..." -ForegroundColor Green
+    Write-Host '   A limpeza iniciara automaticamente na nova versao.' -ForegroundColor DarkGray
+    Write-Host ''
+
+    Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $helperPs1) `
+        -WindowStyle Hidden
+
+    exit 0
+}
+
+function Invoke-AppUpdateCheck {
+    if ($env:LIMPEZA_SKIP_UPDATE -eq '1') { return }
+
+    $install = Get-AppInstallInfo
+    $currentVersion = $install.CurrentVersion
 
     try {
-        $release = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/$GitHubRepo/releases/latest" `
-            -Headers @{ 'User-Agent' = 'LimpezaWindows'; 'Accept' = 'application/vnd.github+json' } `
-            -TimeoutSec 8 `
-            -UseBasicParsing
-        $latest = ($release.tag_name -replace '^v', '').Trim()
-        if ([version]$latest -gt [version]$CurrentVersion) {
+        $release = Get-GitHubLatestRelease
+    }
+    catch {
+        Write-Host ''
+        Write-Host "   $(E 0x26A0) Nao foi possivel verificar atualizacoes. Continuando..." -ForegroundColor DarkYellow
+        Write-Host ''
+        return
+    }
+
+    if ([version]$release.Version -le [version]$currentVersion) {
+        return
+    }
+
+    Write-Host ''
+    Write-Host '  ======================================================' -ForegroundColor Yellow
+    Write-Host "   $(E 0x1F4E5)  ATUALIZACAO DISPONIVEL" -ForegroundColor Yellow
+    Write-Host '  ======================================================' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host "   Versao instalada : v$currentVersion" -ForegroundColor White
+    Write-Host "   Versao no GitHub : v$($release.Version) ($($release.Tag))" -ForegroundColor Green
+    Write-Host "   Publicada em     : $($release.PublishedAt)" -ForegroundColor DarkGray
+    Write-Host "   Detalhes         : $($release.ReleaseUrl)" -ForegroundColor DarkCyan
+
+    if (Read-UpdateChoice) {
+        try {
+            Start-AppUpdateAndRestart -Release $release -Install $install
+        }
+        catch {
             Write-Host ''
-            Write-Host "   $(E 0x1F4E5) Nova versao disponivel: v$latest (voce usa v$CurrentVersion)" -ForegroundColor Yellow
-            Write-Host "       $($release.html_url)" -ForegroundColor DarkCyan
-            Write-Host "       Ou execute atualizar.bat na pasta do projeto." -ForegroundColor DarkGray
+            Write-Host "   $(E 0x274C) Falha ao atualizar: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host '   Continuando com a versao atual...' -ForegroundColor DarkYellow
             Write-Host ''
         }
     }
-    catch {
-        # Sem rede ou sem releases — segue normalmente
+    else {
+        Write-Host ''
+        Write-Host "   $(E 0x25B6) Continuando com v$currentVersion..." -ForegroundColor DarkCyan
+        Write-Host ''
     }
 }
 
@@ -174,7 +338,7 @@ function Show-FinalResult {
 
 Initialize-Console
 Show-IntroAnimation
-Show-GitHubUpdateNotice
+Invoke-AppUpdateCheck
 
 $startTime  = Get-Date
 $freeBefore = Get-DriveCFreeBytes
