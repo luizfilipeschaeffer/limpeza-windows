@@ -4,10 +4,10 @@ param(
     [switch]$ScheduledRun
 )
 
-# Limpeza Avancada do Windows v2.0.7
+# Limpeza Avancada do Windows v2.0.8
 # Autor: Luiz Filipe Schaeffer
 
-$AppVersion = '2.0.7'
+$AppVersion = '2.0.8'
 $GitHubRepo = 'luizfilipeschaeffer/limpeza-windows'
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -768,7 +768,8 @@ function Register-LimpezaScheduledTask {
 
     $taskName = $script:ScheduledTaskName
     $exePath = Get-ScheduledTaskExecutablePath
-    $taskCommand = "cmd.exe /c start `"`" /B `"$exePath`" -ScheduledRun"
+    # /TR direto no .exe (evita cmd/start /B — o schtasks interpreta /B como opcao invalida)
+    $taskCommand = "`"$exePath`" -ScheduledRun"
 
     schtasks /End /TN $taskName 2>$null | Out-Null
     schtasks /Delete /TN $taskName /F 2>$null | Out-Null

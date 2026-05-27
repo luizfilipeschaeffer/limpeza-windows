@@ -1,13 +1,9 @@
-## Limpeza Avancada do Windows v2.0.7
+## Limpeza Avancada do Windows v2.0.8
 
-### Novidades
+### Correcao
 
-- Menu de agendamento existente aceita apenas **Espaco**, **1** ou **2** (tecla unica, sem Enter)
-- Demais teclas sao ignoradas silenciosamente
-
-### Correcoes recentes (v2.0.6)
-
-- Executavel nao fecha mais ao iniciar quando ja existe instalacao em `C:\Windows`
+- **Fix:** erro ao criar agendamento (`Argumento/opcao invalido - '/B'`)
+- O comando da tarefa agora aponta direto para o executavel com `-ScheduledRun`, sem `cmd /c start /B`
 
 ### Atualizacoes
 
