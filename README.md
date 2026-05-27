@@ -1,5 +1,15 @@
 # Limpeza Avançada do Windows
 
+<p align="center">
+  <a href="https://github.com/luizfilipeschaeffer/limpeza-windows/releases/latest/download/LimpezaWindows.exe">
+    <img src="https://img.shields.io/badge/Download-LimpezaWindows.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Baixar LimpezaWindows.exe">
+  </a>
+  &nbsp;
+  <a href="https://github.com/luizfilipeschaeffer/limpeza-windows/releases/latest">
+    <img src="https://img.shields.io/github/v/release/luizfilipeschaeffer/limpeza-windows?label=Versão&style=for-the-badge&color=107C10" alt="Última versão">
+  </a>
+</p>
+
 Ferramenta de manutenção e liberação de espaço no disco C: (TEMP, Prefetch, Windows Installer, DISM, cleanmgr).
 
 **Repositório:** [github.com/luizfilipeschaeffer/limpeza-windows](https://github.com/luizfilipeschaeffer/limpeza-windows)  
@@ -23,9 +33,11 @@ Ao terminar (execução manual), é possível agendar a limpeza (1x ao dia, 1x n
 
 ## Baixar a última versão
 
+Use o botão **Baixar LimpezaWindows.exe** no topo desta página ou:
+
 1. Abra [Releases](https://github.com/luizfilipeschaeffer/limpeza-windows/releases/latest).
 2. Baixe `LimpezaWindows.exe`.
-3. Execute `bin\limpeza.bat` ou o `.exe` diretamente.
+3. Execute o `.exe` como Administrador (UAC) ou use `bin\limpeza.bat` se clonou o repositório.
 
 Ou, com o repositório clonado:
 
