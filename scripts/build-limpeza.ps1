@@ -1,10 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
-$projectDir = $PSScriptRoot
-$buildDir   = Join-Path $projectDir 'ps2exe-build'
-$sourcePs1  = Join-Path $projectDir 'limpeza.ps1'
-$iconFile   = Join-Path $projectDir 'limpeza-icon.ico'
-$outputExe  = Join-Path $projectDir 'LimpezaWindows.exe'
+$projectDir = Split-Path $PSScriptRoot -Parent
+$buildDir   = Join-Path $projectDir 'tools\ps2exe-build'
+$sourcePs1  = Join-Path $projectDir 'src\limpeza.ps1'
+$iconFile   = Join-Path $projectDir 'assets\limpeza-icon.ico'
+$outputExe  = Join-Path $projectDir 'dist\LimpezaWindows.exe'
 $compiler   = Join-Path $buildDir 'ps2exe.ps1'
 $compilerUrl = 'https://raw.githubusercontent.com/MScholtes/PS2EXE/master/Module/ps2exe.ps1'
 
@@ -17,8 +17,9 @@ if (-not (Test-Path $iconFile)) {
 }
 
 New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Split-Path $outputExe -Parent) -Force | Out-Null
 
-$prepareIcon = Join-Path $projectDir 'prepare-icon.ps1'
+$prepareIcon = Join-Path $PSScriptRoot 'prepare-icon.ps1'
 if (Test-Path $prepareIcon) {
     Write-Host 'Preparando icone multi-resolucao (dimensoes nativas)...' -ForegroundColor Cyan
     & $prepareIcon
@@ -55,4 +56,4 @@ Write-Host 'Executavel criado com sucesso:' -ForegroundColor Green
 Write-Host "  $outputExe"
 Write-Host "  Icone: $iconFile"
 Write-Host ''
-Write-Host 'Execute LimpezaWindows.exe diretamente (UAC sera solicitado).' -ForegroundColor Yellow
+Write-Host 'Execute dist\LimpezaWindows.exe ou limpeza.bat na raiz (UAC sera solicitado).' -ForegroundColor Yellow

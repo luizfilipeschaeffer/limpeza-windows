@@ -106,10 +106,11 @@ function Get-IconEntries {
     return $entries
 }
 
-$projectDir = $PSScriptRoot
-$sourceIcon = Join-Path $projectDir 'limpeza-icon.ico'
-$outputIcon = Join-Path $projectDir 'limpeza-icon.ico'
-$backupIcon = Join-Path $projectDir 'limpeza-icon.source.ico'
+$projectDir = Split-Path $PSScriptRoot -Parent
+$assetsDir  = Join-Path $projectDir 'assets'
+$sourceIcon = Join-Path $assetsDir 'limpeza-icon.ico'
+$outputIcon = Join-Path $assetsDir 'limpeza-icon.ico'
+$backupIcon = Join-Path $assetsDir 'limpeza-icon.source.ico'
 
 if (-not (Test-Path $sourceIcon)) {
     throw "Icone nao encontrado: $sourceIcon"
@@ -117,10 +118,10 @@ if (-not (Test-Path $sourceIcon)) {
 
 if (-not (Test-Path $backupIcon)) {
     Copy-Item -Path $sourceIcon -Destination $backupIcon -Force
-    Write-Host "Backup do icone original salvo em limpeza-icon.source.ico"
+    Write-Host "Backup do icone original salvo em assets\limpeza-icon.source.ico"
 }
 
-$tempIcon = Join-Path $projectDir 'limpeza-icon.tmp.ico'
+$tempIcon = Join-Path $assetsDir 'limpeza-icon.tmp.ico'
 New-MultiResolutionIcon -SourceIconPath $backupIcon -OutputIconPath $tempIcon
 Move-Item -Path $tempIcon -Destination $outputIcon -Force
 

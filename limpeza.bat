@@ -1,10 +1,10 @@
 @echo off
 setlocal
 
-:: Launcher: executa LimpezaWindows.exe ou limpeza.ps1 na pasta do projeto
+:: Launcher: executa dist\LimpezaWindows.exe ou src\limpeza.ps1
 set "SCRIPT_DIR=%~dp0"
-set "APP_EXE=%SCRIPT_DIR%LimpezaWindows.exe"
-set "PS_SCRIPT=%SCRIPT_DIR%limpeza.ps1"
+set "APP_EXE=%SCRIPT_DIR%dist\LimpezaWindows.exe"
+set "PS_SCRIPT=%SCRIPT_DIR%src\limpeza.ps1"
 set "PS_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 chcp 65001 >nul 2>&1

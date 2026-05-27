@@ -1,6 +1,12 @@
 Add-Type -AssemblyName System.Drawing
 
-$path = Join-Path $PSScriptRoot 'limpeza-icon.ico'
+$projectDir = Split-Path $PSScriptRoot -Parent
+$path = Join-Path $projectDir 'assets\limpeza-icon.ico'
+
+if (-not (Test-Path $path)) {
+    throw "Icone nao encontrado: $path"
+}
+
 $fs = [IO.File]::OpenRead($path)
 $br = New-Object IO.BinaryReader($fs)
 $null = $br.ReadUInt16()
