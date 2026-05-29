@@ -1,26 +1,52 @@
+param(
+    [ValidateSet('Standard', 'CleanCode')]
+    [string]$Edition = 'Standard'
+)
+
 $ErrorActionPreference = 'Stop'
 
 $projectDir = Split-Path $PSScriptRoot -Parent
-$versionFile = Join-Path $projectDir 'config\VERSION'
-$appVersion = if (Test-Path $versionFile) {
-    (Get-Content $versionFile -Raw).Trim()
+$versionFile = if ($Edition -eq 'CleanCode') {
+    Join-Path $projectDir 'config\VERSION.clean-code'
 } else {
-    '2.0.0.0'
-}
-if ($appVersion -notmatch '\.\d+$') {
-    $appVersion = "$appVersion.0"
+    Join-Path $projectDir 'config\VERSION'
 }
 
-$buildDir    = Join-Path $projectDir 'tools\ps2exe-build'
-$sourcePs1   = Join-Path $projectDir 'src\limpeza.ps1'
-$updatePs1   = Join-Path $projectDir 'src\LimpezaUpdate.ps1'
-$bundlePs1   = Join-Path $buildDir 'limpeza.bundle.ps1'
-$iconFile    = Join-Path $projectDir 'assets\limpeza-icon.ico'
-$outputExe   = Join-Path $projectDir 'dist\LimpezaWindows.exe'
-$compiler    = Join-Path $buildDir 'ps2exe.ps1'
-$wrapperPs1  = Join-Path $buildDir 'compile-limpeza.ps1'
+if (-not (Test-Path -LiteralPath $versionFile)) {
+    throw "Arquivo de versao nao encontrado: $versionFile"
+}
+
+$versionLabel = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+$appVersion = if ($versionLabel -notmatch '\.\d+$') { "$versionLabel.0" } else { $versionLabel }
+
+$buildDir  = Join-Path $projectDir 'tools\ps2exe-build'
+$sourcePs1 = Join-Path $projectDir 'src\limpeza.ps1'
+$updatePs1 = Join-Path $projectDir 'src\LimpezaUpdate.ps1'
+$bundlePs1 = Join-Path $buildDir 'limpeza.bundle.ps1'
+$iconFile  = Join-Path $projectDir 'assets\limpeza-icon.ico'
+
+$editionProfile = switch ($Edition) {
+    'CleanCode' {
+        [PSCustomObject]@{
+            OutputExe    = Join-Path $projectDir 'dist\LimpezaWindows-CleanCode.exe'
+            ProductTitle = 'Limpeza Avancada do Windows (Clean Code)'
+            Description  = 'Manutencao e liberacao de espaco no disco (Clean Code)'
+        }
+    }
+    default {
+        [PSCustomObject]@{
+            OutputExe    = Join-Path $projectDir 'dist\LimpezaWindows.exe'
+            ProductTitle = 'Limpeza Avancada do Windows'
+            Description  = 'Manutencao e liberacao de espaco no disco'
+        }
+    }
+}
+
+$outputExe  = $editionProfile.OutputExe
+$compiler   = Join-Path $buildDir 'ps2exe.ps1'
+$wrapperPs1 = Join-Path $buildDir 'compile-limpeza.ps1'
 $compilerUrl = 'https://raw.githubusercontent.com/MScholtes/PS2EXE/master/Module/ps2exe.ps1'
-$windowsPs   = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$windowsPs  = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
 if (-not (Test-Path $sourcePs1)) {
     throw "Arquivo nao encontrado: $sourcePs1"
@@ -67,7 +93,7 @@ if (Test-Path -LiteralPath $outputExe) {
     Remove-Item -LiteralPath $outputExe -Force
 }
 
-Write-Host 'Gerando bundle (LimpezaUpdate + limpeza)...' -ForegroundColor Cyan
+Write-Host "Gerando bundle ($Edition)..." -ForegroundColor Cyan
 $moduleContent = Get-Content -LiteralPath $updatePs1 -Raw
 $mainContent   = Get-Content -LiteralPath $sourcePs1 -Raw
 $mainContent   = [regex]::Replace(
@@ -79,19 +105,23 @@ Sync-LimpezaUpdateModule -SourceModulePath `$script:LimpezaUpdateSelfPath | Out-
 
 "@
 )
+$mainContent = [regex]::Replace($mainContent, "\`$script:ProductEdition = '[^']+'", "`$script:ProductEdition = '$Edition'")
+$mainContent = [regex]::Replace($mainContent, "\`$AppVersion = '[^']+'", "`$AppVersion = '$versionLabel'")
 Set-Content -LiteralPath $bundlePs1 -Value ($moduleContent + "`r`n`r`n" + $mainContent) -Encoding UTF8
 
 $distDir = Split-Path $outputExe -Parent
 Copy-Item -LiteralPath $updatePs1 -Destination (Join-Path $distDir 'LimpezaUpdate.ps1') -Force
 
-Write-Host 'Compilando LimpezaWindows.exe com icone personalizado...' -ForegroundColor Cyan
+Write-Host "Compilando $(Split-Path -Leaf $outputExe) com icone personalizado..." -ForegroundColor Cyan
+Write-Host "  Edicao     : $Edition" -ForegroundColor DarkGray
+Write-Host "  Versao     : $versionLabel" -ForegroundColor DarkGray
 Write-Host "  Host atual : $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)" -ForegroundColor DarkGray
 Write-Host '  Compilador : Windows PowerShell 5.1 + ps2exe' -ForegroundColor DarkGray
 
 $wrapperContent = @"
 `$ErrorActionPreference = 'Stop'
 . '$($compiler.Replace("'", "''"))'
-Invoke-ps2exe -inputFile '$($bundlePs1.Replace("'", "''"))' -outputFile '$($outputExe.Replace("'", "''"))' -iconFile '$($iconFile.Replace("'", "''"))' -requireAdmin -UNICODEEncoding -title 'Limpeza Avancada do Windows' -description 'Manutencao e liberacao de espaco no disco' -company 'Luiz Filipe Schaeffer' -product 'Limpeza Avancada do Windows' -copyright 'Luiz Filipe Schaeffer' -version '$appVersion'
+Invoke-ps2exe -inputFile '$($bundlePs1.Replace("'", "''"))' -outputFile '$($outputExe.Replace("'", "''"))' -iconFile '$($iconFile.Replace("'", "''"))' -requireAdmin -UNICODEEncoding -title '$($editionProfile.ProductTitle.Replace("'", "''"))' -description '$($editionProfile.Description.Replace("'", "''"))' -company 'Luiz Filipe Schaeffer' -product '$($editionProfile.ProductTitle.Replace("'", "''"))' -copyright 'Luiz Filipe Schaeffer' -version '$appVersion'
 "@
 Set-Content -Path $wrapperPs1 -Value $wrapperContent -Encoding UTF8
 
@@ -107,9 +137,14 @@ if (-not (Test-Path -LiteralPath $outputExe)) {
 Write-Host ''
 Write-Host 'Executavel criado com sucesso:' -ForegroundColor Green
 Write-Host "  $outputExe"
+Write-Host "  Edicao: $Edition"
 Write-Host "  Icone: $iconFile"
 Write-Host "  Versao: $((Get-Item -LiteralPath $outputExe).VersionInfo.ProductVersion)"
 Write-Host "  Modulo: $(Join-Path $distDir 'LimpezaUpdate.ps1')"
 Write-Host ''
-Write-Host 'Execute dist\LimpezaWindows.exe ou bin\limpeza.bat (UAC sera solicitado).' -ForegroundColor Yellow
-Write-Host 'Copie LimpezaUpdate.ps1 junto ao .exe se instalar manualmente fora de C:\Windows.' -ForegroundColor DarkGray
+if ($Edition -eq 'CleanCode') {
+    Write-Host 'Execute dist\LimpezaWindows-CleanCode.exe ou bin\limpeza-clean-code.bat (UAC sera solicitado).' -ForegroundColor Yellow
+}
+else {
+    Write-Host 'Execute dist\LimpezaWindows.exe ou bin\limpeza.bat (UAC sera solicitado).' -ForegroundColor Yellow
+}

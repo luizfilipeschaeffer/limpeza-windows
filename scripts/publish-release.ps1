@@ -1,7 +1,8 @@
 # Compila (opcional) e publica uma release no GitHub com o executavel.
 param(
+    [ValidateSet('Standard', 'CleanCode')]
+    [string]$Edition = 'Standard',
     [string]$Repo = 'luizfilipeschaeffer/limpeza-windows',
-    [string]$AssetName = 'LimpezaWindows.exe',
     [switch]$SkipBuild,
     [switch]$Draft
 )
@@ -9,8 +10,14 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $projectDir  = Split-Path $PSScriptRoot -Parent
-$versionFile = Join-Path $projectDir 'config\VERSION'
-$exePath     = Join-Path $projectDir "dist\$AssetName"
+$versionFile = if ($Edition -eq 'CleanCode') {
+    Join-Path $projectDir 'config\VERSION.clean-code'
+} else {
+    Join-Path $projectDir 'config\VERSION'
+}
+
+$assetName = if ($Edition -eq 'CleanCode') { 'LimpezaWindows-CleanCode.exe' } else { 'LimpezaWindows.exe' }
+$exePath   = Join-Path $projectDir "dist\$assetName"
 $buildScript = Join-Path $PSScriptRoot 'build-limpeza.ps1'
 
 if (-not (Test-Path $versionFile)) {
@@ -21,8 +28,8 @@ $version = (Get-Content $versionFile -Raw).Trim()
 $tag     = "v$version"
 
 if (-not $SkipBuild) {
-    Write-Host 'Compilando executavel...' -ForegroundColor Cyan
-    & $buildScript
+    Write-Host "Compilando executavel ($Edition)..." -ForegroundColor Cyan
+    & $buildScript -Edition $Edition
     Write-Host ''
 }
 
@@ -40,8 +47,8 @@ if (-not (Test-Path $notesPath)) {
 
 ### Como usar
 
-1. Baixe ``$AssetName`` desta release
-2. Execute ``bin\limpeza.bat`` ou o executavel como Administrador
+1. Baixe ``$assetName`` desta release
+2. Execute como Administrador
 
 Repositorio: https://github.com/$Repo
 "@ | Set-Content -Path $notesPath -Encoding UTF8
@@ -54,7 +61,7 @@ $releaseExists = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = $prevEap
 
 if ($releaseExists) {
-    Write-Host "Release $tag ja existe. Enviando asset atualizado..." -ForegroundColor Yellow
+    Write-Host "Release $tag ja existe. Enviando asset $assetName..." -ForegroundColor Yellow
     gh release upload $tag $exePath --repo $Repo --clobber
     Write-Host "Asset atualizado na release $tag." -ForegroundColor Green
     return
@@ -69,7 +76,7 @@ $ghArgs = @(
 )
 if ($Draft) { $ghArgs += '--draft' }
 
-Write-Host "Publicando release $tag no GitHub..." -ForegroundColor Cyan
+Write-Host "Publicando release $tag ($Edition) no GitHub..." -ForegroundColor Cyan
 & gh @ghArgs
 
 Write-Host ''

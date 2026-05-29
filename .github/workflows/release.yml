@@ -15,9 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build executable
+      - name: Build executables
         shell: powershell
-        run: .\scripts\build-limpeza.ps1
+        run: |
+          .\scripts\build-limpeza.ps1 -Edition Standard
+          .\scripts\build-limpeza.ps1 -Edition CleanCode
 
       - name: Create or update GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -31,20 +33,33 @@ jobs:
             $tag = $tag.Substring('refs/tags/'.Length)
           }
 
-          if (-not (Test-Path 'dist/LimpezaWindows.exe')) {
-            throw 'dist/LimpezaWindows.exe nao foi gerado pelo build.'
+          $assets = @(
+            'dist/LimpezaWindows.exe',
+            'dist/LimpezaWindows-CleanCode.exe'
+          )
+
+          foreach ($asset in $assets) {
+            if (-not (Test-Path $asset)) {
+              Write-Warning "Asset ausente (sera ignorado): $asset"
+            }
+          }
+
+          $presentAssets = @($assets | Where-Object { Test-Path $_ })
+          if ($presentAssets.Count -eq 0) {
+            throw 'Nenhum executavel foi gerado pelo build.'
           }
 
           if (-not (Test-Path 'RELEASE_NOTES.md')) {
             @"
           ## Limpeza Avancada do Windows $tag
 
-          - Executavel com icone personalizado e elevacao automatica (UAC)
-          - Limpeza de TEMP, Prefetch, Windows Installer, DISM e cleanmgr
+          - ``LimpezaWindows.exe`` (edicao Standard)
+          - ``LimpezaWindows-CleanCode.exe`` (edicao Clean Code, fluxo linear)
+          - Elevacao automatica (UAC)
 
           ### Como usar
 
-          1. Baixe ``LimpezaWindows.exe`` desta release
+          1. Baixe o executavel da edicao desejada
           2. Execute como Administrador
 
           Repositorio: https://github.com/${{ github.repository }}
@@ -53,10 +68,12 @@ jobs:
 
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "Release $tag ja existe. Atualizando asset..."
-            gh release upload $tag dist/LimpezaWindows.exe --clobber
+            Write-Host "Release $tag ja existe. Atualizando assets..."
+            foreach ($asset in $presentAssets) {
+              gh release upload $tag $asset --clobber
+            }
           } else {
-            gh release create $tag dist/LimpezaWindows.exe `
+            gh release create $tag @presentAssets `
               --title "Limpeza Avancada do Windows $tag" `
               --notes-file RELEASE_NOTES.md
           }
